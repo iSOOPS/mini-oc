@@ -1,0 +1,19 @@
+[package]
+name = "mini-oc-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+rand = { workspace = true }
+url = { workspace = true }
+reqwest = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+wiremock = { workspace = true }

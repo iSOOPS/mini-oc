@@ -1,0 +1,23 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Node
+node_modules/
+apps/mini-oc-web/web/dist/
+
+# 本地环境与数据
+.env
+data/
+*.local.json
+
+# SDD 工作区（技能草稿，不入库）
+.superpowers/
+
+# 系统文件
+.DS_Store
+
+# Flutter（客户端计划使用）
+apps/mini-oc/.dart_tool/
+apps/mini-oc/build/
+apps/mini-oc/.flutter-plugins*
