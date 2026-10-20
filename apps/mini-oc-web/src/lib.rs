@@ -2,6 +2,7 @@
 
 pub mod auth;
 pub mod error;
+pub mod jump;
 pub mod probe;
 pub mod routes;
 pub mod sb;

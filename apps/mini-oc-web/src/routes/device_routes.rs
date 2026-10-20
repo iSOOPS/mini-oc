@@ -8,6 +8,7 @@ use crate::routes::SharedState;
 use crate::snapshot::dual_source;
 use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
+use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::Utc;
@@ -22,6 +23,8 @@ pub fn router() -> Router<SharedState> {
         .route("/api/device-status/:name", get(device_status))
         .route("/api/devices/:name/projects", get(projects))
         .route("/api/devices/:name/sessions", get(sessions))
+        .route("/api/devices/:name/jump", get(jump))
+        .route("/api/devices/:name/detail", get(detail))
 }
 
 /// 设备端拉取属主完整配置（凭 key）。
@@ -204,4 +207,56 @@ async fn sessions(
         state.live_cache.put(&cache_key, resp.clone()).await;
     }
     Ok(Json(resp))
+}
+
+// ---------------------------------------------------------------------------
+// 会话跳转 + 设备详情（Task 9）
+// ---------------------------------------------------------------------------
+
+/// 跳转：BFF 代设备签发 pair code → 返回/302 一次性 connect 链接。
+/// 设备不可达/凭据不一致 → 显式 502，无任何 legacy 回退。
+async fn jump(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> AppResult<axum::response::Response> {
+    use axum::http::StatusCode;
+    use axum::response::Redirect;
+
+    let (user, device) = find_device(&state, &headers, &name).await?;
+    let _directory = params.get("directory"); // 目录参数由设备端 connect 会话上下文使用
+    let _session = params.get("session");
+
+    let tunnel = tunnel_base_url(&device.public_url, device.port)
+        .map_err(|e| AppError::InvalidTarget(e.to_string()))?;
+    let client = OcClient::new(&tunnel, &user.key);
+    let code = client.pair().await.map_err(oc_err)?;
+    let url = crate::jump::connect_url(&tunnel, &code);
+    crate::jump::validate_jump_url(&url, &tunnel)?;
+
+    if params.get("format").map(|f| f == "json").unwrap_or(false) {
+        let body = serde_json::json!({"url": url, "expiresIn": 300});
+        Ok((StatusCode::OK, Json(body)).into_response())
+    } else {
+        Ok(Redirect::to(&url).into_response())
+    }
+}
+
+/// 设备连接详情：仅隧道地址与端口信息，**不含任何凭据**（V1 债务修补）。
+async fn detail(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+) -> AppResult<Json<serde_json::Value>> {
+    let (_user, device) = find_device(&state, &headers, &name).await?;
+    let tunnel_base = tunnel_base_url(&device.public_url, device.port)
+        .map_err(|e| AppError::InvalidTarget(e.to_string()))?;
+    Ok(Json(serde_json::json!({
+        "name": device.name,
+        "tunnelBase": tunnel_base,
+        "port": device.port,
+        "pctype": device.pctype,
+        "bound": device.bound,
+    })))
 }
