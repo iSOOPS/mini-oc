@@ -155,9 +155,8 @@ struct V1User {
 
 #[derive(Debug, Deserialize)]
 struct V1File {
-    /// 无 version 字段的更旧格式按 V1 处理
-    #[serde(default)]
-    version: Option<u32>,
+    /// version 字段（1 或缺失均按 V1 处理）被 serde 忽略；
+    /// V1/V2 格式区分由调用方（SbClient::get_users）先试 V2 反序列化、失败再走 migrate_v1 完成。
     #[serde(default)]
     users: Vec<V1User>,
 }
