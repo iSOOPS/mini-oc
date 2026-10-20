@@ -222,7 +222,6 @@ async fn jump(
     Query(params): Query<HashMap<String, String>>,
 ) -> AppResult<axum::response::Response> {
     use axum::http::StatusCode;
-    use axum::response::Redirect;
 
     let (user, device) = find_device(&state, &headers, &name).await?;
     let _directory = params.get("directory"); // 目录参数由设备端 connect 会话上下文使用
