@@ -37,7 +37,7 @@ async fn sb_get_users_migrates_v1_and_writes_back() {
     // 捕获迁移写回的 PUT
     Mock::given(method("PUT"))
         .and(path("/.fs/web/opencode/config.md"))
-        .and(body_string_contains("\"version\":2"))
+        .and(body_string_contains("\"version\": 2"))
         .and(body_string_contains("\"port\": 9464"))
         .respond_with(ResponseTemplate::new(200))
         .expect(1)
