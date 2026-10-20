@@ -12,6 +12,8 @@ use std::sync::Arc;
 pub struct AppState {
     pub sb: Arc<SbClient>,
     pub cookie_key: Vec<u8>,
+    /// 超管登录密码（= SB_PASSWORD，常数时间比较用）
+    pub admin_password: String,
     pub rate: RateLimiter,
     pub live_cache: Arc<LiveCache>,
     pub started_at: chrono::DateTime<chrono::Utc>,
@@ -40,6 +42,7 @@ impl AppState {
         Ok(Self {
             sb: Arc::new(SbClient::new(sb_base, sb_user, sb_pass)?),
             cookie_key,
+            admin_password: sb_pass.to_string(),
             rate: RateLimiter::new(5, std::time::Duration::from_secs(600)),
             live_cache: Arc::new(LiveCache::new()),
             started_at: chrono::Utc::now(),
