@@ -1,6 +1,9 @@
 [workspace]
 resolver = "2"
 members = ["crates/mini-oc-core", "apps/mini-oc-web"]
+# apps/mini-oc/rust 是 flutter_rust_bridge 管理的独立 crate（frb 的 cargo expand
+# 在 workspace 多 crate 场景下会误传 -p 参数），故排除；它经 path 依赖复用 mini-oc-core。
+exclude = ["apps/mini-oc/rust"]
 
 [workspace.package]
 version = "2.0.0"
