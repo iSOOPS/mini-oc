@@ -2,6 +2,7 @@
 
 pub mod auth;
 pub mod error;
+pub mod probe;
 pub mod routes;
 pub mod sb;
 pub mod state;

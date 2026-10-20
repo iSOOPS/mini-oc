@@ -835,6 +835,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "dotenvy",
+ "futures",
  "hmac",
  "http-body-util",
  "mini-oc-core",

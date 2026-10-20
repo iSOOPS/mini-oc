@@ -1,11 +1,5 @@
 //! mini-oc-web V2：BFF 服务入口。
 
-mod auth;
-mod error;
-mod routes;
-mod sb;
-mod state;
-
 use std::sync::Arc;
 
 #[tokio::main]
@@ -25,7 +19,7 @@ async fn main() {
         .and_then(|v| v.parse().ok())
         .unwrap_or(8100);
 
-    let state = match state::AppState::from_env() {
+    let state = match mini_oc_web::state::AppState::from_env() {
         Ok(s) => Arc::new(s),
         Err(e) => {
             tracing::error!("初始化失败: {e}");
@@ -38,7 +32,7 @@ async fn main() {
         tracing::warn!("启动时 SB 登录失败（稍后自动重试）: {e}");
     }
 
-    let app = routes::build_router(state);
+    let app = mini_oc_web::routes::build_router(state);
     let addr = format!("0.0.0.0:{port}");
     let listener = tokio::net::TcpListener::bind(&addr).await.expect("bind failed");
     tracing::info!("mini-oc-web v2 listening on {addr}");
