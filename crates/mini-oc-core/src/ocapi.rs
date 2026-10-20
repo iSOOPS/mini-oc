@@ -23,7 +23,7 @@ pub enum OcError {
 // 响应类型（宽容反序列化：多余/缺省字段不炸）
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Clone, serde::Serialize, Deserialize, PartialEq)]
 pub struct ServerInfo {
     /// opencode 版本号（探测响应展示用，Task 6 使用）
     #[allow(dead_code)]
@@ -31,7 +31,7 @@ pub struct ServerInfo {
     pub pid: u64,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Clone, serde::Serialize, Deserialize, PartialEq)]
 pub struct Project {
     pub id: String,
     pub canonical: String,
@@ -41,14 +41,14 @@ pub struct Project {
     pub name: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Clone, serde::Serialize, Deserialize, PartialEq)]
 pub struct SessionTime {
     pub created: i64,
     pub updated: i64,
 }
 
 /// 会话摘要（附A 结构的字段子集）。
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Clone, serde::Serialize, Deserialize, PartialEq)]
 pub struct SessionInfo {
     pub id: String,
     #[serde(rename = "projectID")]

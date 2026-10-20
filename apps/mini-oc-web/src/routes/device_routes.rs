@@ -5,17 +5,23 @@ use crate::routes::auth_routes::{current_user, extract_ip};
 use crate::error::{AppError, AppResult};
 use crate::probe::probe_device;
 use crate::routes::SharedState;
-use axum::extract::{Path, State};
+use crate::snapshot::dual_source;
+use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::Utc;
+use mini_oc_core::ocapi::{OcApi, OcClient, OcError};
+use mini_oc_core::tunnel::tunnel_base_url;
+use std::collections::HashMap;
 
 pub fn router() -> Router<SharedState> {
     Router::new()
         .route("/api/user/info", post(user_info))
         .route("/api/device-bind", post(device_bind))
         .route("/api/device-status/:name", get(device_status))
+        .route("/api/devices/:name/projects", get(projects))
+        .route("/api/devices/:name/sessions", get(sessions))
 }
 
 /// 设备端拉取属主完整配置（凭 key）。
@@ -118,4 +124,84 @@ async fn device_status(
         "status": probe.status_str(),
         "version": probe.version(),
     })))
+}
+
+// ---------------------------------------------------------------------------
+// 项目 / 会话双源列表（Task 8）
+// ---------------------------------------------------------------------------
+
+/// 定位当前用户的指定设备。
+async fn find_device(
+    state: &SharedState,
+    headers: &HeaderMap,
+    name: &str,
+) -> AppResult<(mini_oc_core::device::PortalUser, mini_oc_core::device::UserDevice)> {
+    let user = current_user(state, headers).await?;
+    let Some(device) = user.devices.iter().find(|d| d.name == name).cloned() else {
+        return Err(AppError::NotFound(format!("设备 {name} 不存在")));
+    };
+    Ok((user, device))
+}
+
+/// 构造设备的 OcClient（basic opencode:<user.key>）。
+fn device_client(user: &mini_oc_core::device::PortalUser, device: &mini_oc_core::device::UserDevice) -> AppResult<OcClient> {
+    let base = tunnel_base_url(&device.public_url, device.port)
+        .map_err(|e| AppError::InvalidTarget(e.to_string()))?;
+    Ok(OcClient::new(&base, &user.key))
+}
+
+/// OcError → AppError 映射（保持双源判别语义）。
+fn oc_err(e: OcError) -> AppError {
+    match e {
+        OcError::Unauthorized(code) => {
+            AppError::AuthMismatch(format!("设备凭据不一致 (HTTP {code})"))
+        }
+        OcError::Transport => AppError::DeviceOffline("设备不可达".into()),
+        OcError::Other(m) => AppError::DeviceOffline(m),
+    }
+}
+
+async fn projects(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+) -> AppResult<Json<serde_json::Value>> {
+    let (user, device) = find_device(&state, &headers, &name).await?;
+    let cache_key = format!("{}:{}:projects", user.id, name);
+    if let Some(cached) = state.live_cache.get(&cache_key).await {
+        return Ok(Json(cached));
+    }
+    let live = match device_client(&user, &device) {
+        Ok(client) => client.projects().await.map_err(oc_err),
+        Err(e) => Err(e),
+    };
+    let resp = dual_source(state.sb.clone(), &user.id, &name, "projects", live).await?;
+    // 仅 live 结果进入缓存
+    if resp["source"] == "live" {
+        state.live_cache.put(&cache_key, resp.clone()).await;
+    }
+    Ok(Json(resp))
+}
+
+async fn sessions(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> AppResult<Json<serde_json::Value>> {
+    let (user, device) = find_device(&state, &headers, &name).await?;
+    let directory = params.get("directory").cloned();
+    let cache_key = format!("{}:{}:sessions:{}", user.id, name, directory.clone().unwrap_or_default());
+    if let Some(cached) = state.live_cache.get(&cache_key).await {
+        return Ok(Json(cached));
+    }
+    let live = match device_client(&user, &device) {
+        Ok(client) => client.sessions(directory.as_deref()).await.map_err(oc_err),
+        Err(e) => Err(e),
+    };
+    let resp = dual_source(state.sb.clone(), &user.id, &name, "sessions", live).await?;
+    if resp["source"] == "live" {
+        state.live_cache.put(&cache_key, resp.clone()).await;
+    }
+    Ok(Json(resp))
 }

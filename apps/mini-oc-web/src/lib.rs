@@ -5,4 +5,5 @@ pub mod error;
 pub mod probe;
 pub mod routes;
 pub mod sb;
+pub mod snapshot;
 pub mod state;

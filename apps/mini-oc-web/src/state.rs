@@ -3,14 +3,17 @@
 use crate::auth::RateLimiter;
 use crate::error::AppResult;
 use crate::sb::SbClient;
+use crate::snapshot::LiveCache;
 use rand::RngCore;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct AppState {
-    pub sb: SbClient,
+    pub sb: Arc<SbClient>,
     pub cookie_key: Vec<u8>,
     pub rate: RateLimiter,
+    pub live_cache: Arc<LiveCache>,
     pub started_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -35,9 +38,10 @@ impl AppState {
     /// 测试用：显式注入 cookie 密钥（确定性签名）。
     pub fn with_key(sb_base: &str, sb_user: &str, sb_pass: &str, cookie_key: Vec<u8>) -> AppResult<Self> {
         Ok(Self {
-            sb: SbClient::new(sb_base, sb_user, sb_pass)?,
+            sb: Arc::new(SbClient::new(sb_base, sb_user, sb_pass)?),
             cookie_key,
             rate: RateLimiter::new(5, std::time::Duration::from_secs(600)),
+            live_cache: Arc::new(LiveCache::new()),
             started_at: chrono::Utc::now(),
         })
     }
