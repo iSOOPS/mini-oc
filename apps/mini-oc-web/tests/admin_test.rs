@@ -106,30 +106,21 @@ async fn admin_create_rejects_cross_user_duplicate_device_name() {
 
 #[tokio::test]
 async fn admin_full_crud_cycle() {
+    // wiremock 的 GET 是静态响应，无法反映 PUT 写回——create 写回已由
+    // admin_create_user_writes_v2_fields 验证；本测试挂"已有用户"作为前置，
+    // 验证 regenerate/update/delete/list 的完整链路。
     let sb = MockServer::start().await;
-    mount_sb_users(&sb, &users_json(vec![])).await;
-    // 写回通道（create/update/delete/regenerate 全走这里）
+    let user = test_user();
+    mount_sb_users(&sb, &users_json(vec![user.clone()])).await;
     Mock::given(method("PUT"))
         .and(path("/.fs/web/opencode/config.md"))
         .respond_with(ResponseTemplate::new(200))
         .mount(&sb).await;
     let base = spawn_app(&sb).await;
     let cookie = admin_login(&base).await;
+    let uid = user.id;
 
-    // create
-    let resp = reqwest::Client::new()
-        .post(format!("{base}/api/admin/users"))
-        .header("cookie", &cookie)
-        .json(&serde_json::json!({"name": "samuel", "devices": [device_input()]}))
-        .send().await.unwrap();
-    assert_eq!(resp.status(), 200);
-    let created: serde_json::Value = resp.json().await.unwrap();
-    let uid = created["user"]["id"].as_str().unwrap().to_string();
-    let key1 = created["user"]["key"].as_str().unwrap().to_string();
-
-    // list（重挂单一用户注册表）
-    let single = serde_json::json!({"version":2, "users": [created["user"]]}).to_string();
-    mount_sb_users(&sb, &single).await;
+    // list 读回
     let resp = reqwest::Client::new()
         .get(format!("{base}/api/admin/users"))
         .header("cookie", &cookie)
@@ -146,7 +137,7 @@ async fn admin_full_crud_cycle() {
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().await.unwrap();
     let key2 = body["key"].as_str().unwrap().to_string();
-    assert_ne!(key1, key2, "重置后的 key 与旧值不同");
+    assert_ne!(user.key, key2, "重置后的 key 与旧值不同");
     assert_eq!(key2.len(), 32);
 
     // update
