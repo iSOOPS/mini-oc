@@ -25,6 +25,8 @@ pub enum OcError {
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct ServerInfo {
+    /// opencode 版本号（探测响应展示用，Task 6 使用）
+    #[allow(dead_code)]
     pub version: String,
     pub pid: u64,
 }
