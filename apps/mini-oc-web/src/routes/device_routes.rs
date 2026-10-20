@@ -239,7 +239,11 @@ async fn jump(
         let body = serde_json::json!({"url": url, "expiresIn": 300});
         Ok((StatusCode::OK, Json(body)).into_response())
     } else {
-        Ok(Redirect::to(&url).into_response())
+        Ok((
+            StatusCode::FOUND,
+            [(axum::http::header::LOCATION, url)],
+        )
+            .into_response())
     }
 }
 
