@@ -1,8 +1,121 @@
-//! 设备信息/绑定/列表/跳转接口（Task 7-9 填充）。
+//! 设备信息下发 / 绑定 / 深探测（Task 7）。
+//! 项目/会话列表与跳转在 Task 8/9 填充。
 
+use crate::routes::auth_routes::{current_user, extract_ip};
+use crate::error::{AppError, AppResult};
+use crate::probe::probe_device;
 use crate::routes::SharedState;
-use axum::Router;
+use axum::extract::{Path, State};
+use axum::http::HeaderMap;
+use axum::routing::{get, post};
+use axum::{Json, Router};
+use chrono::Utc;
 
 pub fn router() -> Router<SharedState> {
     Router::new()
+        .route("/api/user/info", post(user_info))
+        .route("/api/device-bind", post(device_bind))
+        .route("/api/device-status/:name", get(device_status))
+}
+
+/// 设备端拉取属主完整配置（凭 key）。
+///
+/// V2：不再包含用户级 SB 配置块；devices 为 V2 字段集。
+async fn user_info(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Json(body): Json<serde_json::Value>,
+) -> AppResult<impl axum::response::IntoResponse> {
+    let ip = extract_ip(&headers);
+    state.rate.check(&ip).await?;
+    let key = body["key"].as_str().unwrap_or_default();
+    let file = state.sb.get_users().await?;
+    let Some(user) = file.users.iter().find(|u| u.key == key) else {
+        state.rate.record_failure(&ip).await;
+        return Err(AppError::Unauthorized("密钥错误".into()));
+    };
+    state.rate.reset(&ip).await;
+    Ok(Json(serde_json::json!({
+        "id": user.id,
+        "name": user.name,
+        "key": user.key,
+        "devices": user.devices,
+    })))
+}
+
+#[derive(serde::Deserialize)]
+struct BindBody {
+    key: String,
+    user_id: String,
+    name: String,
+    bound: bool,
+    #[serde(default)]
+    pctype: String,
+    #[serde(rename = "deviceName")]
+    device_name: String,
+    /// 客户端上报的真实平台（身份核验，防共址误染）
+    #[serde(default)]
+    os: String,
+}
+
+/// 设备自注册绑定：写 bound/device_name，校验 key 属主与平台一致。
+async fn device_bind(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Json(body): Json<BindBody>,
+) -> AppResult<impl axum::response::IntoResponse> {
+    let ip = extract_ip(&headers);
+    state.rate.check(&ip).await?;
+    let mut file = state.sb.get_users().await?;
+    let Some(user_id) = file.users.iter().find(|u| u.key == body.key).map(|u| u.id.clone()) else {
+        state.rate.record_failure(&ip).await;
+        return Err(AppError::Unauthorized("密钥错误".into()));
+    };
+    state.rate.reset(&ip).await;
+    if user_id != body.user_id {
+        return Err(AppError::Forbidden("密钥不属于该用户".into()));
+    }
+    let Some(device_pctype) = file
+        .users
+        .iter()
+        .find(|u| u.id == user_id)
+        .and_then(|u| u.devices.iter().find(|d| d.name == body.name))
+        .map(|d| d.pctype.clone())
+    else {
+        return Err(AppError::NotFound(format!("设备 {} 不存在", body.name)));
+    };
+    // 平台核验：客户端上报 os 必须与登记 pctype 一致（V1 踩坑后的防御）
+    if !body.os.is_empty() && !device_pctype.is_empty() && body.os != device_pctype {
+        return Err(AppError::Forbidden(format!(
+            "平台不匹配：设备登记为 {device_pctype}，客户端上报为 {}",
+            body.os
+        )));
+    }
+    // 写回（通过 file 重新定位避免借用冲突）
+    let now = Utc::now().to_rfc3339();
+    let user_slot = file.users.iter_mut().find(|u| u.id == user_id).unwrap();
+    user_slot.updated_at = now.clone();
+    let dev_slot = user_slot.devices.iter_mut().find(|d| d.name == body.name).unwrap();
+    dev_slot.bound = body.bound;
+    dev_slot.device_name = body.device_name;
+    state.sb.put_users(&file).await?;
+    Ok(Json(serde_json::json!({"ok": true})))
+}
+
+/// 单设备深探测（按名，cookie 会话）。
+async fn device_status(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+) -> AppResult<impl axum::response::IntoResponse> {
+    let user = current_user(&state, &headers).await?;
+    let Some(device) = user.devices.iter().find(|d| d.name == name) else {
+        return Err(AppError::NotFound(format!("设备 {name} 不存在")));
+    };
+    let probe = probe_device(device, &user.key).await;
+    Ok(Json(serde_json::json!({
+        "name": name,
+        "status": probe.status_str(),
+        "version": probe.version(),
+    })))
 }
