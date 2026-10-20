@@ -5,7 +5,7 @@ use wiremock::matchers::{header, method, path, query_param, query_param_is_missi
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn client_for(server: &MockServer) -> OcClient {
-    OcClient::new(&server.uri(), "testkey1234567890abcdefghij")
+    OcClient::new(&server.uri(), "testkey1234567890abcdefghij12345")
 }
 
 /// 附A 黄金样例（字段取自实测 /api/session 响应）。
@@ -29,7 +29,7 @@ async fn info_ok_returns_version() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/api/info"))
-        .and(header("Authorization", "Basic b3BlbmNvZGU6dGVzdGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq"))
+        .and(header("Authorization", "Basic b3BlbmNvZGU6dGVzdGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlqMTIzNDU="))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "version": "2.0.32", "pid": 52096,
@@ -61,7 +61,7 @@ async fn info_401_maps_unauthorized() {
 #[tokio::test]
 async fn info_transport_error_on_dead_server() {
     // 端口 1 无监听 → 连接拒绝 → Transport
-    let client = OcClient::new("http://127.0.0.1:1", "testkey1234567890abcdefghij");
+    let client = OcClient::new("http://127.0.0.1:1", "testkey1234567890abcdefghij12345");
     let err = client.info().await.unwrap_err();
     assert!(matches!(err, OcError::Transport), "got {err:?}");
 }
@@ -190,8 +190,8 @@ async fn pair_extracts_code() {
 #[tokio::test]
 async fn requests_carry_basic_auth_header() {
     let server = MockServer::start().await;
-    // base64("opencode:testkey1234567890abcdefghij")
-    let expected = "Basic b3BlbmNvZGU6dGVzdGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq";
+    // base64("opencode:testkey1234567890abcdefghij12345")
+    let expected = "Basic b3BlbmNvZGU6dGVzdGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlqMTIzNDU=";
     Mock::given(method("GET"))
         .and(path("/api/info"))
         .and(header("Authorization", expected))
