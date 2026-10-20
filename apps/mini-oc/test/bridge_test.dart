@@ -3,7 +3,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated_io.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mini_oc/src/rust/api/simple.dart' as simple;
 import 'package:mini_oc/src/rust/frb_generated.dart';
-import 'package:mini_oc/src/rust/lib.dart' as rust;
+import 'package:mini_oc/src/rust/api.dart' as rust;
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

@@ -7,4 +7,5 @@ import 'frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-String ping() => RustLib.instance.api.cratePing();
+/// 桥接链路自检（同步）。
+String ping() => RustLib.instance.api.crateApiPing();
