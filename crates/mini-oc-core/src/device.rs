@@ -112,6 +112,8 @@ impl PortalUser {
 /// 注册表文件结构（SB md 内容的 JSON 主体）。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct UsersFile {
+    /// schema 版本（当前 2；web 层读取判断是否需要迁移）
+    #[allow(dead_code)]
     pub version: u32,
     pub users: Vec<PortalUser>,
 }

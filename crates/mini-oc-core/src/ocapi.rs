@@ -149,10 +149,6 @@ impl OcClient {
         }
     }
 
-    fn basic_auth(&self) -> (&str, &str) {
-        ("opencode", &self.password)
-    }
-
     async fn get_json<T: serde::de::DeserializeOwned>(&self, path: &str, query: &[(&str, String)]) -> Result<T, OcError> {
         let url = format!("{}{path}", self.base);
         let mut req = self.http.get(&url).basic_auth("opencode", Some(&self.password));
