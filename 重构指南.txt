@@ -1,0 +1,59 @@
+阅读 opencode 官方 V2文档
+https://opencode.ai/v2/docs/api
+https://opencode.ai/v2/docs/
+
+编写项目：需要实现2端的功能，分别为
+1、服务器部署的 rust后端+vue3前端 作为 Web服务，专门为移动端服务，也能兼容 pc 端 - 命名为：mini-oc-web
+2、本地电脑运行的 rust客户端（兼容 macos 和 windows） - 命名为： mini-oc
+
+功能要求与解析
+mini-oc（重构项目，原项目为：/Users/samuel/Documents/GitForAi/mini-oc-gui，新项目版本号为 V2）
+1、rust 页面中，包含：启动云服务（启动 opencode server + rathole），启动本地服务（仅启动 opencode server），日志功能（可全屏、可复制），项目与会话选择（展示所有项目、会话，可以检索，点击后触发启动独立窗口运行 opencode 功能，该功能和原有的跳转一致，要支持 macos 和 windows，项目和会话不可复用原来逻辑，需要调用最新的 opencode server 接口功能获取，结构见附A）
+2、重点参考 https://github.com/chen08209/FlClash 的桌面演示与架构，构建的应用页面要求足够好看丝滑
+3、保留用户体系，重新设计用户体系，客户端是根据服务器的 web 服务 创建的用户进行登录后进行交互的，需要登录，登录完成后方可使用“云服务”相关的功能
+
+mini-oc-web（该项目为重构,根据新的流程编写，可参考/Users/samuel/Documents/GitForAi/mini-oc-web）
+1、根据新的业务，修改新增用户所需配置的设备清单内容，核心 rathole 业务交互需要保留保证，而 opencode 端口号等按需删减。
+2、根据新的业务，刷新状态的调用逻辑重构
+
+核心逻辑
+1、存储逻辑，web 端存储逻辑以 sb 存储 md 为核心（和原有的逻辑几乎一致）
+2、用户逻辑，超管逻辑（保持不变），普通用户逻辑，由超管创建，每个用户可配置设备，用户名称，用户编号，和密钥，并由客户端登录（和原有的逻辑几乎一致）
+
+
+附A
+opencode server 的 opencode api get /api/session 返回结构为
+{
+"data": [
+{
+"id": "ses_ec6dcc676ffe2puyLSwHkvf0yr",
+"projectID": "ac0cb1f40ceabf56e24a1f313b2e98ec84e86028",
+"agent": "build",
+"model": {
+"id": "GLM-5.3-Flash",
+"providerID": "GLM-YG",
+"variant": "default"
+},
+"cost": 0,
+"tokens": {
+"input": 309531,
+"output": 12016,
+"reasoning": 11245,
+"cache": {
+"read": 2014784,
+"write": 0
+}
+},
+"outcome": "succeeded",
+"time": {
+"created": 1791959972279,
+"updated": 1791970323934,
+"idle": 1791970323936,
+"viewed": 1791970323936
+},
+"title": "项目源码功能分析",
+"location": {
+"directory": "/Users/samuel/Documents/GitForAi/mini-oc-web"
+}
+},
+...]}
