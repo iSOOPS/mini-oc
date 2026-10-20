@@ -28,10 +28,6 @@ async fn healthz() -> &'static str {
     "ok"
 }
 
-fn static_dir() -> PathBuf {
-    PathBuf::from(std::env::var("WEB_STATIC_DIR").unwrap_or_else(|_| "web/dist".into()))
-}
-
 fn mime_for(path: &str) -> &'static str {
     match path.rsplit('.').next().unwrap_or("") {
         "html" => "text/html; charset=utf-8",

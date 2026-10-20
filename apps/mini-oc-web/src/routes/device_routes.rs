@@ -53,11 +53,13 @@ async fn user_info(
 }
 
 #[derive(serde::Deserialize)]
+#[allow(dead_code)]
 struct BindBody {
     key: String,
     user_id: String,
     name: String,
     bound: bool,
+    /// 登记的平台类型（与 pctype 语义一致，保留用于日志与未来扩展）
     #[serde(default)]
     pctype: String,
     #[serde(rename = "deviceName")]

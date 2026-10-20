@@ -1,0 +1,29 @@
+services:
+  mini-oc-web:
+    build:
+      context: ../..
+      dockerfile: apps/mini-oc-web/Dockerfile
+    image: mini-oc-web:2
+    ports:
+      - "8100:8100"
+    environment:
+      # SilverBullet 连接：指向已加入 app-net 的既有 SB 部署（修补 V1 的幽灵服务引用）
+      SB_BASE_URL: ${SB_BASE_URL:-http://silverbullet:3000}
+      SB_USER: ${SB_USER:-admin}
+      SB_PASSWORD: ${SB_PASSWORD:?需要在 .env 设置}
+      PORTAL_BASE: ${PORTAL_BASE:-http://127.0.0.1:8100}
+    volumes:
+      - mini-oc-web-data:/data
+    networks:
+      - app-net
+    restart: unless-stopped
+
+networks:
+  app-net:
+    external: true
+    # 既有 SilverBullet 部署需加入同一网络：
+    #   docker network create app-net（首次）
+    #   docker network connect app-net <sb-container>
+
+volumes:
+  mini-oc-web-data:
