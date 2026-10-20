@@ -14,7 +14,7 @@ use axum::http::HeaderMap;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::Utc;
-use mini_oc_core::device::{generate_key, generate_user_id, PortalUser, UserDevice, UsersFile};
+use mini_oc_core::device::{generate_key, generate_user_id, PortalUser, UserDevice};
 use sha2::{Digest, Sha256};
 
 /// 管理会话 cookie 名（12 小时）。

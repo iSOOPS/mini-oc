@@ -11,8 +11,17 @@ pub const TEST_COOKIE_KEY: [u8; 32] = [7u8; 32];
 
 /// 启动应用（SB 指向 wiremock 伪服务）。
 pub async fn spawn_app(sb: &MockServer) -> String {
+    spawn_app_with_static(sb, None).await
+}
+
+/// 启动应用（可指定 SPA 静态目录，避免测试间 env 竞态）。
+pub async fn spawn_app_with_static(sb: &MockServer, static_dir: Option<String>) -> String {
+    if let Some(dir) = static_dir {
+        std::env::set_var("WEB_STATIC_DIR", dir);
+    }
     let state = AppState::with_key(&sb.uri(), "admin", "sbpass", TEST_COOKIE_KEY.to_vec()).unwrap();
     let app = mini_oc_web::routes::build_router(Arc::new(state));
+    std::env::remove_var("WEB_STATIC_DIR");
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {

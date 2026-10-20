@@ -1,0 +1,73 @@
+/* mini-oc 主题：FlClash 式 Material 观感——大圆角卡片、亮暗跟随系统 */
+:root {
+  --bg: #f4f5f9;
+  --surface: #ffffff;
+  --surface-2: #eef0f6;
+  --text: #1b1d24;
+  --text-2: #5c6070;
+  --primary: #4f6ef7;
+  --primary-weak: #e5eaff;
+  --green: #22b573;
+  --red: #e5484d;
+  --orange: #f59e0b;
+  --radius-l: 20px;
+  --radius-m: 14px;
+  --shadow: 0 1px 3px rgba(20, 24, 40, 0.06), 0 8px 24px rgba(20, 24, 40, 0.05);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #12141a;
+    --surface: #1b1e26;
+    --surface-2: #232733;
+    --text: #eceef4;
+    --text-2: #9aa0b4;
+    --primary: #7d95ff;
+    --primary-weak: #273052;
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.3);
+  }
+}
+
+* { box-sizing: border-box; margin: 0; }
+html, body, #app { height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Segoe UI', 'Noto Sans SC', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.card {
+  background: var(--surface);
+  border-radius: var(--radius-l);
+  box-shadow: var(--shadow);
+  padding: 16px 18px;
+}
+
+.btn {
+  border: none; cursor: pointer; user-select: none;
+  border-radius: var(--radius-m);
+  padding: 12px 20px; font-size: 15px; font-weight: 600;
+  background: var(--primary); color: #fff;
+  transition: transform 0.12s ease, opacity 0.12s ease;
+}
+.btn:active { transform: scale(0.97); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn.ghost { background: var(--surface-2); color: var(--text); }
+.btn.danger { background: var(--red); }
+.btn.small { padding: 7px 14px; font-size: 13px; border-radius: 10px; }
+
+input, select {
+  width: 100%; padding: 12px 14px; font-size: 15px;
+  border: 1.5px solid transparent; border-radius: var(--radius-m);
+  background: var(--surface-2); color: var(--text); outline: none;
+  transition: border-color 0.15s ease;
+}
+input:focus, select:focus { border-color: var(--primary); }
+
+.dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+.dot.green { background: var(--green); box-shadow: 0 0 8px var(--green); }
+.dot.red { background: var(--red); }
+.dot.orange { background: var(--orange); }
+
+.fade-enter-active, .fade-leave-active { transition: opacity 0.18s ease; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }

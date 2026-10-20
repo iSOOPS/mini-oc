@@ -16,6 +16,8 @@ pub struct AppState {
     pub admin_password: String,
     pub rate: RateLimiter,
     pub live_cache: Arc<LiveCache>,
+    /// SPA 静态目录
+    pub static_dir: PathBuf,
     pub started_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -39,12 +41,16 @@ impl AppState {
 
     /// 测试用：显式注入 cookie 密钥（确定性签名）。
     pub fn with_key(sb_base: &str, sb_user: &str, sb_pass: &str, cookie_key: Vec<u8>) -> AppResult<Self> {
+        let static_dir = PathBuf::from(
+            std::env::var("WEB_STATIC_DIR").unwrap_or_else(|_| "web/dist".into()),
+        );
         Ok(Self {
             sb: Arc::new(SbClient::new(sb_base, sb_user, sb_pass)?),
             cookie_key,
             admin_password: sb_pass.to_string(),
             rate: RateLimiter::new(5, std::time::Duration::from_secs(600)),
             live_cache: Arc::new(LiveCache::new()),
+            static_dir,
             started_at: chrono::Utc::now(),
         })
     }
