@@ -4,8 +4,128 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import 'frb_generated.dart';
+import 'logbuf.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
+import 'supervisor.dart';
+
+// These functions are ignored because they are not marked as `pub`: `bound_device_brief`, `current_key`, `effective_port`, `global_supervisor`, `rathole_settings_dir`, `real_probe`, `real_rathole_command`, `real_serve_command`, `require_serve`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `fmt`, `fmt`
+
 /// 桥接链路自检（同步）。
 String ping() => RustLib.instance.api.crateApiPing();
+
+/// opencode 二进制定位：OPENCODE_BIN env → config.opencode_bin → PATH。
+Future<String> resolveOpencodeBin() =>
+    RustLib.instance.api.crateApiResolveOpencodeBin();
+
+/// 启动本地服务。
+Future<void> startLocal() => RustLib.instance.api.crateApiStartLocal();
+
+/// 启动云服务（需已登录并绑定设备；端口以清单为准）。
+Future<void> startCloud() => RustLib.instance.api.crateApiStartCloud();
+
+/// 停止全部服务。
+Future<void> stopAll() => RustLib.instance.api.crateApiStopAll();
+
+/// 服务状态快照。
+Future<ServiceState> serviceState() =>
+    RustLib.instance.api.crateApiServiceState();
+
+/// 内部：按端口查询项目（可测试注入）。
+Future<List<ProjectSummary>> listProjectsAt({
+  required int port,
+  required String key,
+}) => RustLib.instance.api.crateApiListProjectsAt(port: port, key: key);
+
+/// 项目列表（连本地 serve）。
+Future<List<ProjectSummary>> listProjects() =>
+    RustLib.instance.api.crateApiListProjects();
+
+/// 内部：按端口查询会话。
+Future<List<SessionSummary>> listSessionsAt({
+  required int port,
+  required String key,
+  String? directory,
+}) => RustLib.instance.api.crateApiListSessionsAt(
+  port: port,
+  key: key,
+  directory: directory,
+);
+
+/// 会话列表（连本地 serve，可按目录过滤）。
+Future<List<SessionSummary>> listSessions({String? directory}) =>
+    RustLib.instance.api.crateApiListSessions(directory: directory);
+
+/// 在系统终端新窗口打开（凭据零泄露：见 term_spawn 模块文档）。
+Future<void> openInTerminal({required String directory, String? sessionId}) =>
+    RustLib.instance.api.crateApiOpenInTerminal(
+      directory: directory,
+      sessionId: sessionId,
+    );
+
+/// 日志订阅（frb StreamSink 标准流模式）。
+Stream<LogLine> subscribeLogs() => RustLib.instance.api.crateApiSubscribeLogs();
+
+/// 服务状态流订阅（UI 监听模式切换/崩溃）。
+Stream<ServiceState> subscribeState() =>
+    RustLib.instance.api.crateApiSubscribeState();
+
+/// 项目摘要（frb）。
+class ProjectSummary {
+  final String id;
+  final String name;
+  final String path;
+  final String? vcs;
+
+  const ProjectSummary({
+    required this.id,
+    required this.name,
+    required this.path,
+    this.vcs,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^ name.hashCode ^ path.hashCode ^ vcs.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ProjectSummary &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          name == other.name &&
+          path == other.path &&
+          vcs == other.vcs;
+}
+
+/// 会话摘要（frb）。
+class SessionSummary {
+  final String id;
+  final String? title;
+  final String directory;
+  final PlatformInt64 updatedMs;
+
+  const SessionSummary({
+    required this.id,
+    this.title,
+    required this.directory,
+    required this.updatedMs,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^ title.hashCode ^ directory.hashCode ^ updatedMs.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SessionSummary &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          title == other.title &&
+          directory == other.directory &&
+          updatedMs == other.updatedMs;
+}

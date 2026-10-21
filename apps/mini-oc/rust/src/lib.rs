@@ -17,3 +17,4 @@ pub mod config;
 pub mod logbuf;
 pub mod rathole;
 pub mod supervisor;
+pub mod term_spawn;

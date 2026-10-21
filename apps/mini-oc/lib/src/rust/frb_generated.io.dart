@@ -11,8 +11,11 @@ import 'dart:convert';
 import 'dart:ffi' as ffi;
 
 import 'frb_generated.dart';
+import 'logbuf.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated_io.dart';
+
+import 'supervisor.dart';
 
 abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   RustLibApiImplPlatform({
@@ -23,10 +26,69 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   });
 
   @protected
+  AnyhowException dco_decode_AnyhowException(dynamic raw);
+
+  @protected
+  RustStreamSink<LogLine> dco_decode_StreamSink_log_line_Sse(dynamic raw);
+
+  @protected
+  RustStreamSink<ServiceState> dco_decode_StreamSink_service_state_Sse(
+    dynamic raw,
+  );
+
+  @protected
   String dco_decode_String(dynamic raw);
 
   @protected
+  PlatformInt64 dco_decode_box_autoadd_i_64(dynamic raw);
+
+  @protected
+  int dco_decode_box_autoadd_u_32(dynamic raw);
+
+  @protected
+  int dco_decode_i_32(dynamic raw);
+
+  @protected
+  PlatformInt64 dco_decode_i_64(dynamic raw);
+
+  @protected
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
+
+  @protected
+  List<ProjectSummary> dco_decode_list_project_summary(dynamic raw);
+
+  @protected
+  List<SessionSummary> dco_decode_list_session_summary(dynamic raw);
+
+  @protected
+  LogLine dco_decode_log_line(dynamic raw);
+
+  @protected
+  String? dco_decode_opt_String(dynamic raw);
+
+  @protected
+  PlatformInt64? dco_decode_opt_box_autoadd_i_64(dynamic raw);
+
+  @protected
+  int? dco_decode_opt_box_autoadd_u_32(dynamic raw);
+
+  @protected
+  ProjectSummary dco_decode_project_summary(dynamic raw);
+
+  @protected
+  ServiceMode dco_decode_service_mode(dynamic raw);
+
+  @protected
+  ServiceState dco_decode_service_state(dynamic raw);
+
+  @protected
+  SessionSummary dco_decode_session_summary(dynamic raw);
+
+  @protected
+  int dco_decode_u_16(dynamic raw);
+
+  @protected
+  int dco_decode_u_32(dynamic raw);
 
   @protected
   int dco_decode_u_8(dynamic raw);
@@ -35,10 +97,75 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void dco_decode_unit(dynamic raw);
 
   @protected
+  AnyhowException sse_decode_AnyhowException(SseDeserializer deserializer);
+
+  @protected
+  RustStreamSink<LogLine> sse_decode_StreamSink_log_line_Sse(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  RustStreamSink<ServiceState> sse_decode_StreamSink_service_state_Sse(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   String sse_decode_String(SseDeserializer deserializer);
 
   @protected
+  PlatformInt64 sse_decode_box_autoadd_i_64(SseDeserializer deserializer);
+
+  @protected
+  int sse_decode_box_autoadd_u_32(SseDeserializer deserializer);
+
+  @protected
+  int sse_decode_i_32(SseDeserializer deserializer);
+
+  @protected
+  PlatformInt64 sse_decode_i_64(SseDeserializer deserializer);
+
+  @protected
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
+
+  @protected
+  List<ProjectSummary> sse_decode_list_project_summary(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<SessionSummary> sse_decode_list_session_summary(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  LogLine sse_decode_log_line(SseDeserializer deserializer);
+
+  @protected
+  String? sse_decode_opt_String(SseDeserializer deserializer);
+
+  @protected
+  PlatformInt64? sse_decode_opt_box_autoadd_i_64(SseDeserializer deserializer);
+
+  @protected
+  int? sse_decode_opt_box_autoadd_u_32(SseDeserializer deserializer);
+
+  @protected
+  ProjectSummary sse_decode_project_summary(SseDeserializer deserializer);
+
+  @protected
+  ServiceMode sse_decode_service_mode(SseDeserializer deserializer);
+
+  @protected
+  ServiceState sse_decode_service_state(SseDeserializer deserializer);
+
+  @protected
+  SessionSummary sse_decode_session_summary(SseDeserializer deserializer);
+
+  @protected
+  int sse_decode_u_16(SseDeserializer deserializer);
+
+  @protected
+  int sse_decode_u_32(SseDeserializer deserializer);
 
   @protected
   int sse_decode_u_8(SseDeserializer deserializer);
@@ -47,13 +174,43 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_decode_unit(SseDeserializer deserializer);
 
   @protected
-  int sse_decode_i_32(SseDeserializer deserializer);
-
-  @protected
   bool sse_decode_bool(SseDeserializer deserializer);
 
   @protected
+  void sse_encode_AnyhowException(
+    AnyhowException self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_StreamSink_log_line_Sse(
+    RustStreamSink<LogLine> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_StreamSink_service_state_Sse(
+    RustStreamSink<ServiceState> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_String(String self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_i_64(
+    PlatformInt64 self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_u_32(int self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_i_32(int self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_i_64(PlatformInt64 self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_prim_u_8_strict(
@@ -62,13 +219,61 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_project_summary(
+    List<ProjectSummary> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_session_summary(
+    List<SessionSummary> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_log_line(LogLine self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_String(String? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_i_64(
+    PlatformInt64? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_u_32(int? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_project_summary(
+    ProjectSummary self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_service_mode(ServiceMode self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_service_state(ServiceState self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_session_summary(
+    SessionSummary self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_u_16(int self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_u_32(int self, SseSerializer serializer);
+
+  @protected
   void sse_encode_u_8(int self, SseSerializer serializer);
 
   @protected
   void sse_encode_unit(void self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_i_32(int self, SseSerializer serializer);
 
   @protected
   void sse_encode_bool(bool self, SseSerializer serializer);
