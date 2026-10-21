@@ -14,5 +14,6 @@ mod frb_generated; /* AUTO INJECTED BY flutter_rust_bridge. This line may not be
 pub mod account;
 pub mod api;
 pub mod config;
+pub mod logbuf;
 pub mod rathole;
 pub mod supervisor;
