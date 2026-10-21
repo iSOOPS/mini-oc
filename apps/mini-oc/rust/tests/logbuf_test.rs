@@ -1,15 +1,22 @@
 //! Task 5：环形日志缓冲测试。
+//!
+//! LogBuffer 是全局单例（生产语义）——测试经全局 Mutex 串行避免串扰。
 
 use mini_oc_app::logbuf::{push_log, recent_logs, clear_logs, subscribe_logs_channel, flush_now};
+use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
-fn setup() {
+static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+fn setup() -> MutexGuard<'static, ()> {
+    let guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     clear_logs();
+    guard
 }
 
 #[test]
 fn ring_capacity_truncates_at_2000() {
-    setup();
+    let _guard = setup();
     for i in 0..2500 {
         push_log("opencode", "info", &format!("line-{i}"));
     }
@@ -21,7 +28,7 @@ fn ring_capacity_truncates_at_2000() {
 
 #[test]
 fn source_and_level_marked() {
-    setup();
+    let _guard = setup();
     push_log("rathole", "warn", "连接失败");
     push_log("system", "info", "服务启动");
     let logs = recent_logs(10);
@@ -34,7 +41,7 @@ fn source_and_level_marked() {
 
 #[tokio::test]
 async fn subscribe_receives_batch_after_flush() {
-    setup();
+    let _guard = setup();
     let mut rx = subscribe_logs_channel();
     push_log("opencode", "info", "a");
     push_log("opencode", "info", "b");
@@ -54,7 +61,7 @@ async fn subscribe_receives_batch_after_flush() {
 
 #[test]
 fn recent_n_takes_latest() {
-    setup();
+    let _guard = setup();
     for i in 0..10 {
         push_log("system", "info", &format!("m{i}"));
     }
@@ -65,7 +72,7 @@ fn recent_n_takes_latest() {
 
 #[test]
 fn clear_resets_buffer() {
-    setup();
+    let _guard = setup();
     push_log("system", "info", "x");
     clear_logs();
     assert!(recent_logs(100).is_empty());
@@ -73,7 +80,7 @@ fn clear_resets_buffer() {
 
 #[tokio::test]
 async fn incremental_flush_no_duplicates() {
-    setup();
+    let _guard = setup();
     let mut rx = subscribe_logs_channel();
     let replay = drain(&mut rx).await; // 回放历史（空）
     assert!(replay.is_empty());
