@@ -14,6 +14,9 @@ pub struct DeviceBrief {
     pub bound: bool,
     #[serde(rename = "deviceName")]
     pub device_name: String,
+    /// 隧道公网地址（rathole remote_addr 推导源）
+    #[serde(default)]
+    pub public_url: String,
 }
 
 /// 登录后返回的账户信息。
