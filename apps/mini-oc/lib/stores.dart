@@ -60,3 +60,20 @@ final authProvider =
 final serviceStateProvider = StreamProvider<ServiceState>((ref) {
   return rust.subscribeState();
 });
+
+/// 项目列表（可测试注入）。
+final listProjectsProvider = FutureProvider<List<rust.ProjectSummary>>((ref) async {
+  return rust.listProjects();
+});
+
+/// 指定目录的会话列表（可测试注入）。
+final listSessionsProvider =
+    FutureProvider.family<List<rust.SessionSummary>, String>((ref, directory) async {
+  return rust.listSessions(directory: directory);
+});
+
+/// 终端打开动作（可测试注入，参数断言用）。
+typedef OpenTerminalFn = Future<void> Function(String directory, String? sessionId);
+final openInTerminalProvider = Provider<OpenTerminalFn>((ref) {
+  return (directory, sessionId) => rust.openInTerminal(directory: directory, sessionId: sessionId);
+});
