@@ -1,15 +1,17 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'pages/home_page.dart';
 import 'pages/login_page.dart';
-import 'theme.dart';
 import 'pages/logs_page.dart';
 import 'pages/sessions_page.dart';
 import 'pages/settings_page.dart';
 import 'shell.dart';
+import 'src/rust/api.dart' as rust;
 import 'stores.dart';
+import 'theme.dart';
 
 /// 路由：三级守卫（未登录 redirect /login；已登录主页）。
 final routerProvider = Provider<GoRouter>((ref) {
@@ -39,17 +41,42 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
     ],
   );
-});
+}
 
 void main() {
   runApp(const ProviderScope(child: MiniOcApp()));
 }
 
-class MiniOcApp extends ConsumerWidget {
+class MiniOcApp extends ConsumerStatefulWidget {
   const MiniOcApp({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<MiniOcApp> createState() => _MiniOcAppState();
+}
+
+class _MiniOcAppState extends ConsumerState<MiniOcApp> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// 应用退出前清理：停 serve + rathole（防孤儿进程占端口）。
+  @override
+  void didRequestAppExit() {
+    // 优雅停机后放行退出
+    rust.stopAll().catchError((_) {});
+    super.didRequestAppExit();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final router = ref.watch(routerProvider);
     return MaterialApp.router(
       title: 'mini-oc',
