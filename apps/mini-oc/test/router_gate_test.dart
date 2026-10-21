@@ -20,7 +20,6 @@ void main() {
     final path = candidates.firstWhere((c) => File(c).existsSync(), orElse: () => candidates.first);
     await RustLib.init(externalLibrary: ExternalLibrary.open(path));
     // 空配置目录 → 未登录态
-    final dir = Directory.systemTemp.createTempSync('mini-oc-gate');
     // ignore: invalid_use_of_visible_for_testing
     // （MINI_OC_HOME 由 rust 侧进程 env 读取——测试进程注入）
     // rust 侧读取的是自身进程 env，Dart VM 与 native 同进程，set env 经 Process? 不行——

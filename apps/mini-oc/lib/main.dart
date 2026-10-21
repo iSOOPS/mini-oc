@@ -10,7 +10,6 @@ import 'pages/sessions_page.dart';
 import 'pages/settings_page.dart';
 import 'shell.dart';
 import 'stores.dart';
-import 'theme.dart';
 
 /// 路由：三级守卫（未登录 redirect /login；已登录主页）。
 final routerProvider = Provider<GoRouter>((ref) {

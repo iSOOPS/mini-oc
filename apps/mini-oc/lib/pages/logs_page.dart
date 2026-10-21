@@ -3,7 +3,6 @@ import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../stores.dart';
 import '../src/rust/api.dart' as rust;
 import '../src/rust/logbuf.dart' show LogLine;
 

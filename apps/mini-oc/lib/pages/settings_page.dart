@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../stores.dart';
 import '../src/rust/api.dart' as rust;
+import '../src/rust/config.dart' show ClientConfig;
 
 /// 设置页：服务器地址、opencode 路径、端口偏好、主题、关于。
 class SettingsPage extends ConsumerStatefulWidget {
@@ -30,7 +31,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
   Future<void> _save() async {
     final cfg = rust.loadConfig();
-    final newCfg = rust.ClientConfig(
+    final newCfg = ClientConfig(
       serverUrl: _server.text.trim(),
       user: cfg.user,
       boundDevice: cfg.boundDevice,
@@ -42,12 +43,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       await rust.saveConfig(cfg: newCfg);
       if (mounted) {
         setState(() => _dirty = false);
-        ScaffoldMessenger.maybeOf(context)
-            ?.showSnackBar(const SnackBar(content: Text('已保存（服务器地址修改需重新登录生效）')));
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+            const SnackBar(content: Text('已保存（服务器地址修改需重新登录生效）')));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.maybeOf(context).showSnackBar(SnackBar(content: Text('保存失败：$e')));
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text('保存失败：$e')));
       }
     }
   }

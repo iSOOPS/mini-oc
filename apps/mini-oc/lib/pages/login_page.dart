@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../stores.dart';
+import '../src/rust/api.dart' as rust;
 
 /// 登录页：服务器地址 + 密钥；成功后进入绑定流程（多设备选择）。
 class LoginPage extends ConsumerStatefulWidget {
@@ -22,7 +23,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   void initState() {
     super.initState();
     // 预填已保存的服务器地址
-    final cfg = ref.read(rustCfgProvider);
+    final cfg = rust.loadConfig();
     _server.text = cfg.serverUrl;
   }
 

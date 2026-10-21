@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../stores.dart';
-import '../src/rust/supervisor.dart' show ServiceMode, ServiceState;
+import '../src/rust/supervisor.dart' show ServiceMode;
 import '../src/rust/api.dart' as rust;
 
 /// 仪表盘：服务双开关 + 运行状态 + 账户卡。
@@ -27,8 +27,10 @@ class _HomePageState extends ConsumerState<HomePage> {
       } else {
         await ref.read(rustStartLocalProvider.future);
       }
+      if (!mounted) return;
       messenger?.showSnackBar(const SnackBar(content: Text('服务已启动 ✓')));
     } catch (e) {
+      if (!mounted) return;
       messenger?.showSnackBar(SnackBar(content: Text('启动失败：$e')));
     } finally {
       if (mounted) setState(() => _starting = false);
@@ -177,7 +179,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                         Icon(Icons.error_outline, color: scheme.onErrorContainer, size: 18),
                         const SizedBox(width: 8),
                         Expanded(
-                          child: Text(st!.lastError!,
+                          child: Text(st?.lastError ?? '',
                               style: TextStyle(color: scheme.onErrorContainer, fontSize: 13)),
                         ),
                         TextButton(

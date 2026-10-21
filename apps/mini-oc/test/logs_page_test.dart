@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:mini_oc/pages/logs_page.dart';
-import 'package:mini_oc/stores.dart';
 import 'package:mini_oc/src/rust/logbuf.dart' show LogLine;
 
 LogLine _l(String source, String msg) => LogLine(
