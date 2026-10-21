@@ -39,6 +39,8 @@ dependencies:
   window_manager: ^0.5.2
   rust_lib_mini_oc:
     path: rust_builder
+  flutter_riverpod: ^3.4.3
+  go_router: ^18.1.1
 
 dev_dependencies:
   flutter_test:

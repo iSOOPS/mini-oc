@@ -7,32 +7,6 @@ import 'frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `default_data_dir`, `default_port`, `default_theme`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `eq`, `eq`, `fmt`, `fmt`
-
-/// 配置文件路径（MINI_OC_HOME 覆盖 → 平台数据目录）。
-Future<PathBuf> configPath() => RustLib.instance.api.crateConfigConfigPath();
-
-/// 读配置：文件缺失/损坏 → 默认值（不 panic）。
-Future<ClientConfig> loadConfigFrom({required Path path}) =>
-    RustLib.instance.api.crateConfigLoadConfigFrom(path: path);
-
-/// 写配置：tempfile + rename 原子替换，0600 权限。
-Future<void> saveConfigTo({required Path path, required ClientConfig cfg}) =>
-    RustLib.instance.api.crateConfigSaveConfigTo(path: path, cfg: cfg);
-
-Future<ClientConfig> loadConfig() =>
-    RustLib.instance.api.crateConfigLoadConfig();
-
-Future<void> saveConfig({required ClientConfig cfg}) =>
-    RustLib.instance.api.crateConfigSaveConfig(cfg: cfg);
-
-// Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<Path>>
-abstract class Path implements RustOpaqueInterface {}
-
-// Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<PathBuf>>
-abstract class PathBuf implements RustOpaqueInterface {}
-
 class ClientConfig {
   /// mini-oc-web 服务器地址
   final String serverUrl;
@@ -56,9 +30,6 @@ class ClientConfig {
     this.opencodeBin,
     required this.theme,
   });
-
-  static Future<ClientConfig> default_() =>
-      RustLib.instance.api.crateConfigClientConfigDefault();
 
   @override
   int get hashCode =>
@@ -88,9 +59,6 @@ class StoredUser {
   final String key;
 
   const StoredUser({required this.id, required this.name, required this.key});
-
-  static Future<StoredUser> default_() =>
-      RustLib.instance.api.crateConfigStoredUserDefault();
 
   @override
   int get hashCode => id.hashCode ^ name.hashCode ^ key.hashCode;

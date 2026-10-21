@@ -3,6 +3,8 @@
 
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
+import 'account.dart';
+import 'config.dart';
 import 'frb_generated.dart';
 import 'logbuf.dart';
 
@@ -12,6 +14,31 @@ import 'supervisor.dart';
 
 // These functions are ignored because they are not marked as `pub`: `bound_device_brief`, `current_key`, `effective_port`, `global_supervisor`, `rathole_settings_dir`, `real_probe`, `real_rathole_command`, `real_serve_command`, `require_serve`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `fmt`, `fmt`
+
+/// 登录（见 account::login）。
+Future<AccountInfo> login({required String serverUrl, required String key}) =>
+    RustLib.instance.api.crateApiLogin(serverUrl: serverUrl, key: key);
+
+/// 绑定设备（见 account::bind_device）。
+Future<void> bindDevice({
+  required String deviceName,
+  required String pctype,
+  required String os,
+}) => RustLib.instance.api.crateApiBindDevice(
+  deviceName: deviceName,
+  pctype: pctype,
+  os: os,
+);
+
+/// 登出（见 account::logout）。
+Future<void> logout() => RustLib.instance.api.crateApiLogout();
+
+/// 读本地配置（同步：本地文件操作）。
+ClientConfig loadConfig() => RustLib.instance.api.crateApiLoadConfig();
+
+/// 写本地配置。
+Future<void> saveConfig({required ClientConfig cfg}) =>
+    RustLib.instance.api.crateApiSaveConfig(cfg: cfg);
 
 /// 桥接链路自检（同步）。
 String ping() => RustLib.instance.api.crateApiPing();

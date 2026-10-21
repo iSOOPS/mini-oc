@@ -7,27 +7,6 @@ import 'frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `http`, `mask`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `eq`, `fmt`, `fmt`
-
-/// 登录：拉取属主配置并持久化（失败不污染现有配置）。
-Future<AccountInfo> login({required String serverUrl, required String key}) =>
-    RustLib.instance.api.crateAccountLogin(serverUrl: serverUrl, key: key);
-
-/// 绑定设备（需已登录）：上报本机标识与平台，服务端核验 pctype 一致。
-Future<void> bindDevice({
-  required String deviceName,
-  required String pctype,
-  required String os,
-}) => RustLib.instance.api.crateAccountBindDevice(
-  deviceName: deviceName,
-  pctype: pctype,
-  os: os,
-);
-
-/// 登出：清 user/bound_device，保留 server_url/port（下次登录省事）。
-Future<void> logout() => RustLib.instance.api.crateAccountLogout();
-
 /// 登录后返回的账户信息。
 class AccountInfo {
   final String id;
@@ -61,12 +40,16 @@ class DeviceBrief {
   final bool bound;
   final String deviceName;
 
+  /// 隧道公网地址（rathole remote_addr 推导源）
+  final String publicUrl;
+
   const DeviceBrief({
     required this.name,
     required this.port,
     required this.pctype,
     required this.bound,
     required this.deviceName,
+    required this.publicUrl,
   });
 
   @override
@@ -75,7 +58,8 @@ class DeviceBrief {
       port.hashCode ^
       pctype.hashCode ^
       bound.hashCode ^
-      deviceName.hashCode;
+      deviceName.hashCode ^
+      publicUrl.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -86,5 +70,6 @@ class DeviceBrief {
           port == other.port &&
           pctype == other.pctype &&
           bound == other.bound &&
-          deviceName == other.deviceName;
+          deviceName == other.deviceName &&
+          publicUrl == other.publicUrl;
 }

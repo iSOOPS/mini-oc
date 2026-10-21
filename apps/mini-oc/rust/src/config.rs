@@ -103,8 +103,9 @@ pub fn save_config_to(path: &std::path::Path, cfg: &ClientConfig) -> Result<(), 
     Ok(())
 }
 
-// —— frb 暴露的无参版本 —— 
+// —— frb 暴露的无参版本（同步：本地文件操作无 await 必要）—— 
 
+#[flutter_rust_bridge::frb(sync)]
 pub fn load_config() -> ClientConfig {
     load_config_from(&config_path())
 }

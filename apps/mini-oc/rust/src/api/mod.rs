@@ -1,10 +1,10 @@
 //! frb 入口模块：暴露给 Dart 的函数与类型。
 //!
 //! 只有本命名空间内的 pub 项生成 Dart 绑定（flutter_rust_bridge.yaml 限定 crate::api）。
+//! 注意：frb 2.11 不展开 pub use 的函数——包装函数直接定义于此。
 
-pub use crate::account::{bind_device, login, logout, AccountInfo, DeviceBrief};
-pub use crate::config::{load_config, save_config, ClientConfig, StoredUser};
-// frb 需要类型在 api 命名空间可见
+pub use crate::account::DeviceBrief;
+pub use crate::config::{ClientConfig, StoredUser};
 pub use crate::logbuf::LogLine;
 pub use crate::supervisor::ServiceState;
 
@@ -12,6 +12,32 @@ use crate::supervisor::{SupConfig, Supervisor};
 use mini_oc_core::ocapi::{OcApi, OcClient};
 use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
+
+/// 登录（见 account::login）。
+pub async fn login(server_url: String, key: String) -> Result<crate::account::AccountInfo, String> {
+    crate::account::login(&server_url, &key).await
+}
+
+/// 绑定设备（见 account::bind_device）。
+pub async fn bind_device(device_name: String, pctype: String, os: String) -> Result<(), String> {
+    crate::account::bind_device(&device_name, &pctype, &os).await
+}
+
+/// 登出（见 account::logout）。
+pub fn logout() -> Result<(), String> {
+    crate::account::logout()
+}
+
+/// 读本地配置（同步：本地文件操作）。
+#[flutter_rust_bridge::frb(sync)]
+pub fn load_config() -> ClientConfig {
+    crate::config::load_config()
+}
+
+/// 写本地配置。
+pub fn save_config(cfg: ClientConfig) -> Result<(), String> {
+    crate::config::save_config(&cfg)
+}
 
 /// 桥接链路自检（同步）。
 #[flutter_rust_bridge::frb(sync)]
@@ -119,7 +145,7 @@ async fn bound_device_brief() -> Result<Option<DeviceBrief>, String> {
     let Some(bound) = cfg.bound_device else {
         return Ok(None);
     };
-    let info = login(&cfg.server_url, &user.key).await?;
+    let info = crate::account::login(&cfg.server_url, &user.key).await?;
     Ok(info.devices.into_iter().find(|d| d.name == bound))
 }
 
