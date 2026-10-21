@@ -19,6 +19,9 @@ tracing = "0.1"
 whoami = "1"
 toml = "0.8"
 
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.29", features = ["signal", "process"] }
+
 [dev-dependencies]
 wiremock = "0.6"
 tempfile = "3"

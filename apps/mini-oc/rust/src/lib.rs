@@ -15,3 +15,4 @@ pub mod account;
 pub mod api;
 pub mod config;
 pub mod rathole;
+pub mod supervisor;
