@@ -9,7 +9,7 @@
 use crate::account::DeviceBrief;
 use mini_oc_core::tunnel::remote_addr_for_rathole;
 use serde::Serialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Serialize)]
 struct Service {
@@ -47,12 +47,26 @@ pub fn rathole_toml(device: &DeviceBrief, user_key: &str) -> Result<String, Stri
     toml::to_string_pretty(&cfg).map_err(|e| format!("toml 序列化失败: {e}"))
 }
 
+/// 写 rathole 设置文件（内含 user.key —— **0600 落盘**，I7 修复）。
+pub fn write_settings_toml(path: &Path, content: &str) -> Result<(), String> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("创建 rathole 目录失败: {e}"))?;
+    }
+    std::fs::write(path, content).map_err(|e| format!("写入 rathole 配置失败: {e}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| format!("设置 rathole 配置权限失败: {e}"))?;
+    }
+    Ok(())
+}
+
 /// 二进制定位优先级：
 /// 1. `RATHOLE_BIN` env
 /// 2. exe 同目录 `assets/rathole/bin/<os>-<arch>/rathole[.exe]`（随包分发的 bundle）
 /// 3. PATH 上的 `rathole`
-pub fn resolve_rathole_bin() -> Option<PathBuf> {
-    if let Ok(p) = std::env::var("RATHOLE_BIN") {
+pub fn resolve_rathole_bin() -> Option<PathBuf> {    if let Ok(p) = std::env::var("RATHOLE_BIN") {
         if !p.is_empty() {
             return Some(PathBuf::from(p));
         }

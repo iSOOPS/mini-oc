@@ -122,31 +122,46 @@ pub struct UsersFile {
 // V1 → V2 迁移
 // ---------------------------------------------------------------------------
 
-/// V1 设备条目（含废弃字段，宽容反序列化）。
+/// V1 设备条目（wire 格式：**kebab-case** 字段，与 V1 mini-oc-web users.rs 的
+/// serde 定义逐字段对齐；snake_case 作为别名兼容本仓库早期误写）。
+/// 裸字符串是更早的 legacy 设备形态（仅服务名）。
 #[derive(Debug, Deserialize)]
-struct V1Device {
-    desc: String,
-    name: String,
-    port: u16,
-    /// V1 的 opencode serve 端口——V2 `port` 的语义本体
-    #[serde(default)]
-    oc_port: Option<u16>,
-    #[serde(default)]
-    device_name: String,
-    pctype: String,
-    #[serde(default)]
-    bound: bool,
-    public_url: String,
+#[serde(untagged)]
+enum V1DeviceWire {
+    Full {
+        #[serde(default, alias = "d-name")]
+        desc: String,
+        name: String,
+        #[serde(default = "v1_legacy_default_port")]
+        port: u16,
+        /// V1 的 opencode serve 端口——V2 `port` 的语义本体
+        #[serde(rename = "oc-port", alias = "oc_port", default)]
+        oc_port: Option<u16>,
+        #[serde(rename = "device-name", alias = "device_name", default)]
+        device_name: String,
+        #[serde(default)]
+        pctype: String,
+        #[serde(default)]
+        bound: bool,
+        #[serde(rename = "public-url", alias = "public_url", default)]
+        public_url: String,
+    },
+    /// 更早的 legacy 形态：裸服务名字符串（pctype/public_url 全空，不可用）
+    Legacy(String),
 }
 
-/// V1 用户条目（含废弃字段）。
+/// V1 的 legacy 设备缺省端口（users.rs LEGACY_DEFAULT_PORT）。
+fn v1_legacy_default_port() -> u16 {
+    4040
+}
+
 #[derive(Debug, Deserialize)]
 struct V1User {
     id: String,
     name: String,
     key: String,
     #[serde(default)]
-    devices: Vec<V1Device>,
+    devices: Vec<V1DeviceWire>,
     created_at: String,
     updated_at: String,
     #[serde(default)]
@@ -164,25 +179,49 @@ struct V1File {
 /// V1 注册表 JSON → V2 UsersFile。
 ///
 /// 规则：
-/// - 设备 port 取 V1 `ocPort`（opencode serve 端口），缺失时保留原 `port`；
-/// - 剥除 cloudIp / sb / ocPort 等废弃字段；
-/// - 单条设备校验失败跳过该设备（不炸全表）；
-/// - 整条用户结构性损坏跳过该用户。
+/// - 设备字段兼容 kebab-case（V1 真实格式）与 snake-case（本仓库早期误写）双形态；
+/// - 设备 port 取 V1 `oc-port`（opencode serve 端口），缺失时保留原 `port`（含 legacy 默认 4040）；
+/// - 剥除 cloud_ip / sb / oc-port 等废弃字段；
+/// - 裸字符串 legacy 设备（pctype/public_url 全空、不可探测）跳过并告警；
+/// - **UUID 形态的旧 id 改写为新的唯一 6 位数字**（保留用户不丢弃，对齐 V1 迁移策略）；
+/// - 单条设备校验失败跳过该设备（不炸全表）。
 pub fn migrate_v1(raw: &str) -> Result<UsersFile, String> {
     let v1: V1File = serde_json::from_str(raw).map_err(|e| format!("V1 注册表解析失败: {e}"))?;
+    // 第一遍：收集已占用的 6 位 id（原样保留的用户）
+    let mut taken: Vec<String> = v1
+        .users
+        .iter()
+        .filter(|u| u.id.len() == 6 && u.id.chars().all(|c| c.is_ascii_digit()))
+        .map(|u| u.id.clone())
+        .collect();
+
     let mut users = Vec::new();
     for u in v1.users {
         let mut devices = Vec::new();
         for d in u.devices {
-            let port = d.oc_port.unwrap_or(d.port);
-            let dev = UserDevice {
-                desc: d.desc,
-                name: d.name,
-                port,
-                pctype: d.pctype,
-                device_name: d.device_name,
-                bound: d.bound,
-                public_url: d.public_url,
+            let dev = match d {
+                V1DeviceWire::Full {
+                    desc,
+                    name,
+                    port,
+                    oc_port,
+                    device_name,
+                    pctype,
+                    bound,
+                    public_url,
+                } => UserDevice {
+                    desc,
+                    name,
+                    port: oc_port.unwrap_or(port),
+                    pctype,
+                    device_name,
+                    bound,
+                    public_url,
+                },
+                V1DeviceWire::Legacy(name) => {
+                    tracing::warn!(user = %u.id, device = %name, "跳过裸字符串 legacy 设备（信息不全，不可用）");
+                    continue;
+                }
             };
             match dev.validate() {
                 Ok(()) => devices.push(dev),
@@ -191,8 +230,17 @@ pub fn migrate_v1(raw: &str) -> Result<UsersFile, String> {
                 }
             }
         }
+        // UUID 旧 id → 新 6 位数字（不丢弃用户）
+        let id = if u.id.len() == 6 && u.id.chars().all(|c| c.is_ascii_digit()) {
+            u.id
+        } else {
+            let new_id = generate_user_id(&taken);
+            tracing::warn!(old = %u.id, new = %new_id, "UUID 形态旧 id 改写为 6 位数字");
+            taken.push(new_id.clone());
+            new_id
+        };
         let user = PortalUser {
-            id: u.id,
+            id,
             name: u.name,
             key: u.key,
             devices,

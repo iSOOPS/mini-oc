@@ -169,7 +169,7 @@ pub async fn start_cloud() -> Result<(), String> {
     let toml_dir = rathole_settings_dir()?;
     std::fs::create_dir_all(&toml_dir).map_err(|e| format!("创建 rathole 目录失败: {e}"))?;
     let toml_path = toml_dir.join("global.toml");
-    std::fs::write(&toml_path, &toml).map_err(|e| format!("写入 rathole 配置失败: {e}"))?;
+    crate::rathole::write_settings_toml(&toml_path, &toml)?;
     global_supervisor().start_cloud(device.port, &toml_path).await
 }
 

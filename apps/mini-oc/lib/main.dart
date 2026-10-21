@@ -1,7 +1,7 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:window_manager/window_manager.dart';
 
 import 'pages/home_page.dart';
 import 'pages/login_page.dart';
@@ -41,9 +41,13 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
     ],
   );
-}
+});
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  // I3 修复：接管关窗事件——点 X 也走优雅停机（防孤儿进程占端口）
+  await windowManager.ensureInitialized();
+  await windowManager.setPreventClose(true);
   runApp(const ProviderScope(child: MiniOcApp()));
 }
 
@@ -54,25 +58,28 @@ class MiniOcApp extends ConsumerStatefulWidget {
   ConsumerState<MiniOcApp> createState() => _MiniOcAppState();
 }
 
-class _MiniOcAppState extends ConsumerState<MiniOcApp> with WidgetsBindingObserver {
+class _MiniOcAppState extends ConsumerState<MiniOcApp> with WindowListener {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
+    windowManager.addListener(this);
   }
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
+    windowManager.removeListener(this);
     super.dispose();
   }
 
-  /// 应用退出前清理：停 serve + rathole（防孤儿进程占端口）。
+  /// 任意关闭路径（点 X / ⌘Q / 系统）→ 优雅停机（上限 6s）后真正退出。
   @override
-  void didRequestAppExit() {
-    // 优雅停机后放行退出
-    rust.stopAll().catchError((_) {});
-    super.didRequestAppExit();
+  void onWindowClose() async {
+    try {
+      await rust.stopAll().timeout(const Duration(seconds: 6));
+    } catch (_) {
+      // 超时/失败也放行退出（SIGTERM 已尽力发出）
+    }
+    await windowManager.destroy();
   }
 
   @override

@@ -63,20 +63,25 @@ fn build_macos(
     nonce: &str,
     user_key: &str,
 ) -> Result<TerminalPlan, String> {
+    // 单引号转义（I6：业务参数一律转义，防命令注入）
+    let sh = |s: &str| s.replace('\'', "'\\''");
+
     // 1) env 文件（0600，含唯一明文点——同机同用户可读是接受的威胁模型边界）
     let env_path = tmp.join(format!("{ENV_PREFIX}{nonce}.env"));
-    let env_content = format!("export OPENCODE_PASSWORD='{user_key}'\n");
+    let env_content = format!("export OPENCODE_PASSWORD='{}'\n", sh(user_key));
 
     // 2) launcher.sh：source env 文件后 exec（bash PID 即 opencode PID）
     let script_path = tmp.join(format!("{ENV_PREFIX}{nonce}.sh"));
-    let session_arg = session.map(|s| format!(" --session {s}")).unwrap_or_default();
+    let session_arg = session
+        .map(|s| format!(" --session '{}'", sh(s)))
+        .unwrap_or_default();
     let script_content = format!(
-        "#!/bin/bash\n# mini-oc 终端启动器（自动生成，勿手改）\nsource '{env}'\nexec '{binary}' --server '{url}'{session_arg} '{directory}'\n",
-        env = env_path.display(),
-        binary = binary,
-        url = server_url,
-        session_arg = session_arg,
-        directory = directory,
+        "#!/bin/bash\n# mini-oc 终端启动器（自动生成，勿手改）\nsource '{}'\nexec '{}' --server '{}'{} '{}'\n",
+        env_path.display(),
+        sh(binary),
+        sh(server_url),
+        session_arg,
+        sh(directory),
     );
 
     std::fs::write(&env_path, &env_content).map_err(|e| format!("写入 env 失败: {e}"))?;
@@ -124,10 +129,18 @@ fn build_windows(
     _nonce: &str,
 ) -> Result<TerminalPlan, String> {
     // env 经进程链继承（cmd /c start 子进程继承 env），launcher.ps1 只读 $env:
-    let script_path = tmp.join("mini-oc-launcher.ps1");
-    let session_arg = session.map(|s| format!(" --session {s}")).unwrap_or_default();
+    // PowerShell 单引号转义：' → ''（I6）
+    let ps = |s: &str| s.replace('\'', "''");
+    let script_path = tmp.join(format!("{ENV_PREFIX}{}.ps1", std::process::id()));
+    let session_arg = session
+        .map(|s| format!(" --session '{}'", ps(s)))
+        .unwrap_or_default();
     let script_content = format!(
-        "# mini-oc 终端启动器（自动生成，勿手改）\nSet-Location -LiteralPath '{directory}'\n& '{binary}' --server '{url}'{session_arg} .\n",
+        "# mini-oc 终端启动器（自动生成，勿手改）\nSet-Location -LiteralPath '{}'\n& '{}' --server '{}'{} .\n",
+        ps(directory),
+        ps(binary),
+        ps(server_url),
+        session_arg,
     );
     std::fs::write(&script_path, &script_content).map_err(|e| format!("写入脚本失败: {e}"))?;
     let display_command = format!(

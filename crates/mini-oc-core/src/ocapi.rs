@@ -48,14 +48,15 @@ pub struct SessionTime {
 }
 
 /// 会话摘要（附A 结构的字段子集）。
-#[derive(Debug, Clone, serde::Serialize, Deserialize, PartialEq)]
+/// 会话摘要（附A 结构的字段子集；Deserialize 为自定义宽松实现，见下方）。
+#[derive(Debug, Clone, serde::Serialize, PartialEq)]
 pub struct SessionInfo {
     pub id: String,
-    #[serde(rename = "projectID")]
+    #[serde(rename = "projectID", default)]
     pub project_id: String,
     #[serde(default)]
     pub title: Option<String>,
-    /// location.directory
+    /// location.directory（宽松反序列化兼容平级/嵌套两形态）
     #[serde(default = "empty_string")]
     pub directory: String,
     pub time: SessionTime,
@@ -68,28 +69,48 @@ fn empty_string() -> String {
 impl SessionInfo {
     /// 从附A 原始 JSON 提取 directory 到平级字段。
     pub fn from_value(v: serde_json::Value) -> Result<Self, serde_json::Error> {
-        #[derive(Deserialize)]
+        serde_json::from_value(v)
+    }
+}
+
+/// 宽松反序列化：兼容「location.directory 嵌套」（opencode API 原始形态，
+/// 亦即快照存储形态）与「directory 平级」两种输入。
+impl<'de> serde::Deserialize<'de> for SessionInfo {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
         struct Raw {
             id: String,
-            #[serde(rename = "projectID")]
-            project_id: String,
+            #[serde(default)]
+            project_id: Option<String>,
+            #[serde(rename = "projectID", default)]
+            project_id_upper: Option<String>,
             #[serde(default)]
             title: Option<String>,
+            #[serde(default)]
+            directory: Option<String>,
             #[serde(default)]
             location: Option<RawLocation>,
             time: SessionTime,
         }
-        #[derive(Deserialize)]
+        #[derive(serde::Deserialize)]
         struct RawLocation {
             #[serde(default)]
             directory: Option<String>,
         }
-        let raw: Raw = serde_json::from_value(v)?;
+        let raw: Raw = Raw::deserialize(d)?;
+        let directory = raw
+            .directory
+            .or_else(|| raw.location.and_then(|l| l.directory))
+            .unwrap_or_default();
+        let project_id = raw
+            .project_id_upper
+            .or(raw.project_id)
+            .unwrap_or_default();
         Ok(SessionInfo {
             id: raw.id,
-            project_id: raw.project_id,
+            project_id,
             title: raw.title,
-            directory: raw.location.and_then(|l| l.directory).unwrap_or_default(),
+            directory,
             time: raw.time,
         })
     }

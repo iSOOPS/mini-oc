@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../stores.dart';
-import '../src/rust/api.dart' as rust;
+import '../src/rust/account.dart' show DeviceBrief;
 
 /// 登录页：服务器地址 + 密钥；成功后进入绑定流程（多设备选择）。
 class LoginPage extends ConsumerStatefulWidget {
@@ -23,7 +23,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   void initState() {
     super.initState();
     // 预填已保存的服务器地址
-    final cfg = rust.loadConfig();
+    final cfg = ref.read(rustCfgProvider);
     _server.text = cfg.serverUrl;
   }
 
@@ -41,7 +41,20 @@ class _LoginPageState extends ConsumerState<LoginPage> {
       _error = null;
     });
     try {
-      await ref.read(authProvider.notifier).login(_server.text.trim(), _key.text.trim());
+      final info =
+          await ref.read(authProvider.notifier).login(_server.text.trim(), _key.text.trim());
+      if (!mounted) return;
+      if (info.devices.isNotEmpty) {
+        // 绑定流程（I5 修复）：设备选择弹层——云服务的前置
+        final picked = await showDialog<String>(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => _DevicePickerDialog(devices: info.devices),
+        );
+        if (picked != null) {
+          await ref.read(authProvider.notifier).bindDevice(picked);
+        }
+      }
       if (mounted) context.go('/home');
     } catch (e) {
       setState(() => _error = e.toString());
@@ -96,6 +109,38 @@ class _LoginPageState extends ConsumerState<LoginPage> {
           ),
         ),
       ),
+    );
+  }
+}
+
+
+/// 设备选择弹层（绑定流程入口，I5）。
+class _DevicePickerDialog extends StatelessWidget {
+  const _DevicePickerDialog({required this.devices});
+  final List<DeviceBrief> devices;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('选择要绑定的设备'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final d in devices)
+            ListTile(
+              leading: Icon(d.pctype == 'windows' ? Icons.desktop_windows : Icons.laptop_mac),
+              title: Text(d.name),
+              subtitle: Text('端口 ${d.port} · ${d.deviceName.isEmpty ? "未绑定" : d.deviceName}'),
+              onTap: () => Navigator.pop(context, d.name),
+            ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context), // 取消 = 暂不绑定（本地服务仍可用）
+          child: const Text('暂不绑定'),
+        ),
+      ],
     );
   }
 }

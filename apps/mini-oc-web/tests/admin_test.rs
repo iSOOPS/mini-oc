@@ -169,3 +169,27 @@ async fn no_admin_info_endpoint_exists() {
         .send().await.unwrap();
     assert_eq!(resp.status(), 404);
 }
+
+#[tokio::test]
+async fn admin_login_brute_force_rate_limited() {
+    // I2 修复：管理端登录与用户登录同样限流（V1 有、V2 丢失的防爆破）
+    let sb = MockServer::start().await;
+    mount_sb_users(&sb, &users_json(vec![])).await;
+    let base = spawn_app(&sb).await;
+    for i in 0..5 {
+        let resp = reqwest::Client::new()
+            .post(format!("{base}/api/admin/login"))
+            .json(&serde_json::json!({"password": "wrong"}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 401, "第 {i} 次错误密码");
+    }
+    let resp = reqwest::Client::new()
+        .post(format!("{base}/api/admin/login"))
+        .json(&serde_json::json!({"password": "wrong"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 429, "第 6 次被限流");
+}

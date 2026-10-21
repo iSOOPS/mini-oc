@@ -10,11 +10,16 @@ use std::time::{Duration, Instant};
 
 type HmacSha256 = Hmac<Sha256>;
 
-/// HMAC-SHA256 签名 cookie 值：`base64url(subject|ttl).base64url(signature)`
+/// HMAC-SHA256 签名 cookie：`base64url(subject|ttl|issued_at).base64url(sig)`
 pub fn sign_cookie(subject: &str, key: &[u8], ttl: Duration) -> AppResult<String> {
+    sign_cookie_at(subject, key, ttl, chrono::Utc::now().timestamp())
+}
+
+/// 带签发时间的签名（服务端 TTL 校验依赖 issued_at，I1 修复）。
+pub fn sign_cookie_at(subject: &str, key: &[u8], ttl: Duration, now_secs: i64) -> AppResult<String> {
     let mut mac = HmacSha256::new_from_slice(key)
         .map_err(|e| AppError::Internal(format!("hmac key error: {e}")))?;
-    let payload = format!("{subject}|{}", ttl.as_secs());
+    let payload = format!("{subject}|{}|{now_secs}", ttl.as_secs());
     mac.update(payload.as_bytes());
     let sig = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
     let payload_b64 = URL_SAFE_NO_PAD.encode(payload.as_bytes());
@@ -22,6 +27,11 @@ pub fn sign_cookie(subject: &str, key: &[u8], ttl: Duration) -> AppResult<String
 }
 
 pub fn verify_cookie(cookie: &str, key: &[u8]) -> AppResult<String> {
+    verify_cookie_at(cookie, key, chrono::Utc::now().timestamp())
+}
+
+/// 带当前时间的校验：签名 + TTL 服务端强制过期。
+pub fn verify_cookie_at(cookie: &str, key: &[u8], now_secs: i64) -> AppResult<String> {
     let parts: Vec<&str> = cookie.split('.').collect();
     if parts.len() != 2 {
         return Err(AppError::Unauthorized("malformed cookie".into()));
@@ -32,13 +42,17 @@ pub fn verify_cookie(cookie: &str, key: &[u8]) -> AppResult<String> {
     let payload = String::from_utf8(payload_bytes)
         .map_err(|_| AppError::Unauthorized("bad payload utf8".into()))?;
     let inner: Vec<&str> = payload.split('|').collect();
-    if inner.len() != 2 {
-        return Err(AppError::Unauthorized("bad payload format".into()));
+    if inner.len() != 3 {
+        // 兼容无签发时间的旧格式：一律拒绝（要求重新登录，安全优先）
+        return Err(AppError::Unauthorized("expired".into()));
     }
     let subject = inner[0];
-    let ttl_secs: u64 = inner[1]
+    let ttl_secs: i64 = inner[1]
         .parse()
         .map_err(|_| AppError::Unauthorized("bad ttl".into()))?;
+    let issued_at: i64 = inner[2]
+        .parse()
+        .map_err(|_| AppError::Unauthorized("bad issued_at".into()))?;
     let sig = URL_SAFE_NO_PAD
         .decode(parts[1])
         .map_err(|_| AppError::Unauthorized("bad sig encoding".into()))?;
@@ -47,7 +61,8 @@ pub fn verify_cookie(cookie: &str, key: &[u8]) -> AppResult<String> {
     mac.update(payload.as_bytes());
     mac.verify_slice(&sig)
         .map_err(|_| AppError::Unauthorized("bad signature".into()))?;
-    if ttl_secs == 0 {
+    // 服务端 TTL 强制过期（不再依赖浏览器 Max-Age）
+    if ttl_secs <= 0 || now_secs.saturating_sub(issued_at) >= ttl_secs {
         return Err(AppError::Unauthorized("expired".into()));
     }
     Ok(subject.to_string())
@@ -104,6 +119,19 @@ mod tests {
         let key = b"0123456789abcdef0123456789abcdef";
         let cookie = sign_cookie("u:100001", key, Duration::from_secs(3600)).unwrap();
         assert_eq!(verify_cookie(&cookie, key).unwrap(), "u:100001");
+    }
+
+    #[test]
+    fn cookie_expires_server_side() {
+        // I1 修复：TTL 必须由服务端强制——签发于 2 小时前、TTL 1 小时的 cookie 拒绝
+        let key = b"0123456789abcdef0123456789abcdef";
+        let now = 1_800_000_000i64;
+        let cookie = sign_cookie_at("admin", key, Duration::from_secs(3600), now - 7200).unwrap();
+        let err = verify_cookie_at(&cookie, key, now).unwrap_err();
+        assert!(err.to_string().contains("expired"), "got {err}");
+        // 未过期仍有效
+        let fresh = sign_cookie_at("admin", key, Duration::from_secs(3600), now - 60).unwrap();
+        assert_eq!(verify_cookie_at(&fresh, key, now).unwrap(), "admin");
     }
 
     #[test]

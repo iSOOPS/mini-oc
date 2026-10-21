@@ -166,6 +166,64 @@ async fn live_result_cached_60s_no_second_device_hit() {
 }
 
 #[tokio::test]
+async fn sessions_snapshot_filtered_by_requested_directory() {
+    // I8 修复：快照按 device 共享一份，回退时必须按请求 directory 过滤
+    let sb = MockServer::start().await;
+    let device = MockServer::start().await;
+    // 设备 401（触发快照回退）
+    Mock::given(method("GET")).and(path("/api/session"))
+        .respond_with(ResponseTemplate::new(401))
+        .mount(&device).await;
+    // 快照含 A/B 两目录的会话
+    let snapshot = serde_json::json!({
+        "fetched_at": "2026-10-20T10:00:00Z",
+        "data": [
+            {"id": "ses_a", "projectID": "p1", "cost": 0,
+             "tokens": {"input": 0, "output": 0, "reasoning": 0, "cache": {"read": 0, "write": 0}},
+             "time": {"created": 1, "updated": 2},
+             "title": "目录A会话", "location": {"directory": "/proj/a"}},
+            {"id": "ses_b", "projectID": "p1", "cost": 0,
+             "tokens": {"input": 0, "output": 0, "reasoning": 0, "cache": {"read": 0, "write": 0}},
+             "time": {"created": 1, "updated": 3},
+             "title": "目录B会话", "location": {"directory": "/proj/b"}}
+        ]
+    });
+    Mock::given(method("GET"))
+        .and(path("/.fs/serv/opencode/snapshots/100001/macbook-pro/sessions.md"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(snapshot))
+        .mount(&sb).await;
+    let mut user = test_user();
+    user.devices[0].public_url = device.uri();
+    mount_sb_users(&sb, &users_json(vec![user.clone()])).await;
+    let base = spawn_app(&sb).await;
+    let cookie = reqwest::Client::new()
+        .post(format!("{base}/api/login"))
+        .json(&serde_json::json!({"key": user.key}))
+        .send().await.unwrap()
+        .headers().get("set-cookie").unwrap().to_str().unwrap()
+        .split(';').next().unwrap().to_string();
+
+    // 请求目录 B → 仅返回 B 的会话
+    let resp = reqwest::Client::new()
+        .get(format!("{base}/api/devices/macbook-pro/sessions?directory=/proj/b"))
+        .header("cookie", &cookie)
+        .send().await.unwrap();
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["source"], "snapshot");
+    let data = body["data"].as_array().unwrap();
+    assert_eq!(data.len(), 1, "只含目录 B 的会话: {data:?}");
+    assert_eq!(data[0]["id"], "ses_b");
+    // 无 directory 参数 → 全量快照
+    let resp = reqwest::Client::new()
+        .get(format!("{base}/api/devices/macbook-pro/sessions"))
+        .header("cookie", &cookie)
+        .send().await.unwrap();
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["data"].as_array().unwrap().len(), 2, "无目录过滤全量");
+}
+
+#[tokio::test]
 async fn sessions_live_passes_directory_param() {
     let sb = MockServer::start().await;
     let device = MockServer::start().await;

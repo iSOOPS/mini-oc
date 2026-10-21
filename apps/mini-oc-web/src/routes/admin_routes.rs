@@ -61,10 +61,16 @@ async fn admin_login(
     headers: HeaderMap,
     Json(body): Json<serde_json::Value>,
 ) -> AppResult<impl axum::response::IntoResponse> {
+    // 独立 bucket 防爆破（I2：与用户登录同限流强度，SB_PASSWORD 是高价值目标）
+    let ip = crate::routes::auth_routes::extract_ip(&headers);
+    let bucket = format!("admin:{ip}");
+    state.rate.check(&bucket).await?;
     let password = body["password"].as_str().unwrap_or_default();
     if password.is_empty() || !constant_time_eq(password, &state.admin_password) {
+        state.rate.record_failure(&bucket).await;
         return Err(AppError::Unauthorized("密码错误".into()));
     }
+    state.rate.reset(&bucket).await;
     let https = headers
         .get("x-forwarded-proto")
         .and_then(|v| v.to_str().ok())

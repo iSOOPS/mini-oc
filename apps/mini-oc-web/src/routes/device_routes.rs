@@ -204,7 +204,15 @@ async fn sessions(
         Ok(client) => client.sessions(directory.as_deref()).await.map_err(oc_err),
         Err(e) => Err(e),
     };
-    let resp = dual_source(state.sb.clone(), &user.id, &name, "sessions", live).await?;
+    let mut resp = dual_source(state.sb.clone(), &user.id, &name, "sessions", live).await?;
+    // I8 修复：快照按 device 共享一份——回退数据必须按请求 directory 过滤
+    if resp["source"] == "snapshot" {
+        if let Some(dir) = &directory {
+            if let Some(list) = resp["data"].as_array_mut() {
+                list.retain(|s| s["directory"].as_str() == Some(dir.as_str()));
+            }
+        }
+    }
     if resp["source"] == "live" {
         state.live_cache.put(&cache_key, resp.clone()).await;
     }

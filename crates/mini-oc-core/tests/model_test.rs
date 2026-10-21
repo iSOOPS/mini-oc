@@ -88,8 +88,95 @@ fn migrate_accepts_missing_version_field() {
 }
 
 #[test]
-fn migrate_rejects_garbage() {
+fn migrate_v1_rejects_garbage() {
     assert!(migrate_v1("not json at all").is_err());
+}
+
+/// 真实 V1 输出形态（kebab-case 字段 + cloud_ip + sb 块 + oc-port）。
+/// 样例格式与 V1 mini-oc-web users.rs 的 serde 定义逐字段对齐。
+fn v1_real_fixture() -> String {
+    serde_json::json!({
+        "version": 1,
+        "users": [
+            {
+                "id": "100001",
+                "name": "samuel",
+                "key": "k123456789012345678901234567890a",
+                "cloud_ip": "http://1.2.3.4:8100",
+                "last_used_at": "2026-10-01T00:00:00Z",
+                "devices": [
+                    {
+                        "desc": "工作电脑",
+                        "name": "macbook-pro",
+                        "port": 9465,
+                        "oc-port": 9464,
+                        "device-name": "Samuels-MacBook",
+                        "pctype": "macos",
+                        "bound": true,
+                        "public-url": "https://oc.example.com"
+                    }
+                ],
+                "sb": {"base_url": "http://sb:3000", "username": "u", "password": "p"},
+                "created_at": "2026-09-01T00:00:00Z",
+                "updated_at": "2026-09-02T00:00:00Z"
+            },
+            {
+                "id": "9f8b7c6d-1111-2222-3333-444455556666",
+                "name": "legacy-uuid-user",
+                "key": "k123456789012345678901234567890b",
+                "cloud_ip": "",
+                "last_used_at": null,
+                "devices": [
+                    "bare-string-device",
+                    {"d-name": "老格式设备", "name": "old-dev", "pctype": "windows", "public-url": "http://1.2.3.4:9101"}
+                ],
+                "sb": {"base_url": "http://sb:3000", "username": "u", "password": "p"},
+                "created_at": "2026-08-01T00:00:00Z",
+                "updated_at": "2026-08-01T00:00:00Z"
+            }
+        ]
+    })
+    .to_string()
+}
+
+#[test]
+fn migrate_real_v1_kebab_case_fixture() {
+    // C1 回归：V1 设备字段是 kebab-case（oc-port/public-url/device-name），
+    // 早期实现误按 snake_case 解析导致真实数据整表失败。
+    let f = migrate_v1(&v1_real_fixture()).unwrap();
+    assert_eq!(f.version, 2);
+    assert_eq!(f.users.len(), 2, "两个用户都保留");
+
+    // 用户 1：oc-port → port 语义迁移
+    let u1 = &f.users[0];
+    assert_eq!(u1.id, "100001");
+    assert_eq!(u1.devices.len(), 1);
+    let d = &u1.devices[0];
+    assert_eq!(d.port, 9464, "port 取 V1 oc-port");
+    assert_eq!(d.public_url, "https://oc.example.com", "public-url 正确读取");
+    assert_eq!(d.device_name, "Samuels-MacBook", "device-name 正确读取");
+    assert_eq!(d.pctype, "macos");
+
+    // 用户 2：uuid id 改写为 6 位数字（保留用户，不丢弃）
+    let u2 = &f.users[1];
+    assert_eq!(u2.id.len(), 6);
+    assert!(u2.id.chars().all(|c| c.is_ascii_digit()), "uuid 改写为 6 位数字");
+    assert_ne!(u1.id, u2.id, "改写后的 id 不冲突");
+    // 裸字符串设备跳过（desc/pctype/public_url 全空，本就不可用）；d-name 别名设备保留
+    assert_eq!(u2.devices.len(), 1, "仅保留完整设备");
+    assert_eq!(u2.devices[0].name, "old-dev");
+    assert_eq!(u2.devices[0].desc, "老格式设备", "d-name 别名生效");
+    assert_eq!(u2.devices[0].port, 4040, "缺省 port 取 legacy 默认 4040");
+}
+
+#[test]
+fn migrate_kebab_and_snake_aliases_both_accepted() {
+    // V2 内部已写过 snake_case（本仓库早期误写）→ 双形态兼容读取
+    let snake = r#"{"version":1,"users":[{"id":"100002","name":"u2","key":"k123456789012345678901234567890a","created_at":"t","updated_at":"t","devices":[{"desc":"d","name":"pc-1","port":9001,"oc_port":9009,"device_name":"PC","pctype":"windows","public_url":"http://1.2.3.4:9101"}]}]}"#;
+    let f = migrate_v1(snake).unwrap();
+    assert_eq!(f.users[0].devices[0].port, 9009, "snake_case oc_port 别名");
+    assert_eq!(f.users[0].devices[0].public_url, "http://1.2.3.4:9101");
+    assert_eq!(f.users[0].devices[0].device_name, "PC");
 }
 
 #[test]

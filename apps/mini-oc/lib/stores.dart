@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'src/rust/api.dart' as rust;
+import 'src/rust/account.dart' show AccountInfo;
+import 'src/rust/config.dart' show ClientConfig;
 import 'src/rust/frb_generated.dart';
 import 'src/rust/supervisor.dart' show ServiceState;
 
@@ -36,9 +38,11 @@ class AuthNotifier extends Notifier<AuthState> {
     );
   }
 
-  Future<void> login(String serverUrl, String key) async {
+  /// 登录并返回设备清单（页面据此进入绑定流程）。
+  Future<AccountInfo> login(String serverUrl, String key) async {
     final info = await rust.login(serverUrl: serverUrl, key: key);
     state = AuthState(userId: info.id, userName: info.name);
+    return info;
   }
 
   Future<void> bindDevice(String name) async {
@@ -55,6 +59,9 @@ class AuthNotifier extends Notifier<AuthState> {
 
 final authProvider =
     NotifierProvider<AuthNotifier, AuthState>(AuthNotifier.new);
+
+/// 本地配置只读快照（避免 UI 直接触 Rust 桥接，测试可注入）。
+final rustCfgProvider = Provider<ClientConfig>((ref) => rust.loadConfig());
 
 /// 服务运行状态流。
 final serviceStateProvider = StreamProvider<ServiceState>((ref) {

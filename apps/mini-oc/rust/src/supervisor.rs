@@ -135,7 +135,7 @@ impl Supervisor {
         }
     }
 
-    /// 启动本地服务：spawn serve → 探针存活（10s）→ LocalOnly。
+    /// 启动本地服务：spawn serve（stdout/stderr 管道接入日志）→ 探针存活（10s）→ LocalOnly。
     pub async fn start_local(&self, port: u16) -> Result<(), String> {
         self.stop_all().await?;
         Self::ensure_port_free(port)?;
@@ -145,9 +145,12 @@ impl Supervisor {
             use std::os::windows::process::CommandExt;
             cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
         }
-        let child = cmd
+        cmd.stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        let mut child = cmd
             .spawn()
             .map_err(|e| format!("opencode 启动失败（检查二进制路径）: {e}"))?;
+        spawn_traced(&mut child, "opencode");
         {
             let mut inner = self.inner.lock().unwrap();
             inner.serve = Some(child);
@@ -202,9 +205,12 @@ impl Supervisor {
             use std::os::windows::process::CommandExt;
             cmd.creation_flags(0x0800_0000);
         }
-        let child = cmd
+        cmd.stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        let mut child = cmd
             .spawn()
             .map_err(|e| format!("rathole 启动失败: {e}"))?;
+        spawn_traced(&mut child, "rathole");
         {
             let mut inner = self.inner.lock().unwrap();
             inner.rathole = Some(child);
@@ -319,6 +325,29 @@ impl Supervisor {
                 }
             }
         }
+    }
+}
+
+/// 子进程 stdout/stderr 逐行接入日志管道（I4：spec §5.6 日志数据源）。
+/// std::process 管道是同步 IO——每管道一个阻塞线程，进程退出后管道关闭线程自然结束。
+fn spawn_traced(child: &mut std::process::Child, source: &'static str) {
+    if let Some(out) = child.stdout.take() {
+        std::thread::spawn(move || {
+            use std::io::BufRead;
+            let reader = std::io::BufReader::new(out);
+            for line in reader.lines().map_while(Result::ok) {
+                crate::logbuf::push_log(source, "info", &line);
+            }
+        });
+    }
+    if let Some(err) = child.stderr.take() {
+        std::thread::spawn(move || {
+            use std::io::BufRead;
+            let reader = std::io::BufReader::new(err);
+            for line in reader.lines().map_while(Result::ok) {
+                crate::logbuf::push_log(source, "warn", &line);
+            }
+        });
     }
 }
 
