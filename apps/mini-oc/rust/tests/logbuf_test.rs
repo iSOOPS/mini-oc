@@ -93,7 +93,7 @@ async fn incremental_flush_no_duplicates() {
     assert_eq!(batch2[1].message, "n3");
 }
 
-async fn drain(rx: &mut tokio::sync::UnboundedReceiver<mini_oc_app::logbuf::LogLine>) -> Vec<mini_oc_app::logbuf::LogLine> {
+async fn drain(rx: &mut tokio::sync::mpsc::UnboundedReceiver<mini_oc_app::logbuf::LogLine>) -> Vec<mini_oc_app::logbuf::LogLine> {
     let mut out = Vec::new();
     let deadline = std::time::Instant::now() + Duration::from_millis(300);
     while std::time::Instant::now() < deadline {
