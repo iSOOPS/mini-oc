@@ -16,7 +16,20 @@
 
 ## 待执行（需要环境）
 
-### macOS 真机 GUI（需安装完整 Xcode）
+### macOS 真机 GUI（✅ 2026-10-27 构建成功 + 冒烟通过；以下交互项待人工执行）
+
+打包产物：`apps/mini-oc/build/macos/Build/Products/Release/mini_oc.app`（69MB，universal binary x86_64+arm64，v2.0.0，内嵌 rathole bundle）
+
+构建要点（已固化进 `scripts/build-macos.sh`）：
+- CocoaPods 须用 Homebrew 版（1.17）且**清掉 rvm 的 GEM_HOME/GEM_PATH**（否则 pod 报 rexml 缺失）；
+- Rust crate 包名必须为 `rust_lib_mini_oc`（cargokit 按包名定位静态库，与 podspec 库名一致）；
+- `whoami` crate 需在 podspec 链接 `SystemConfiguration` + `CoreServices` 框架。
+
+已自动验证：
+- [x] 构建成功（71.9MB → 打包后 69MB）
+- [x] Info.plist 版本 2.0.0、universal binary、rathole bundle 已入 Resources
+- [x] 启动冒烟：进程稳定运行、窗口 800×632 正常创建、退出无孤儿进程
+- [x] e2e 真实链路回归（crate 重命名后 `e2e_local_test` 仍绿）
 
 ```bash
 cd apps/mini-oc && ./scripts/build-macos.sh
