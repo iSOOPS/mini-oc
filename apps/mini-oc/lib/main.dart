@@ -10,6 +10,7 @@ import 'pages/sessions_page.dart';
 import 'pages/settings_page.dart';
 import 'shell.dart';
 import 'src/rust/api.dart' as rust;
+import 'src/rust/frb_generated.dart';
 import 'stores.dart';
 import 'theme.dart';
 
@@ -48,6 +49,9 @@ void main() async {
   // I3 修复：接管关窗事件——点 X 也走优雅停机（防孤儿进程占端口）
   await windowManager.ensureInitialized();
   await windowManager.setPreventClose(true);
+  // 关键：Rust 桥接必须在任何 provider 读到 rust 之前初始化
+  // （authProvider.build 同步调 rust.loadConfig，若未初始化则首帧白屏）
+  await RustLib.init();
   runApp(const ProviderScope(child: MiniOcApp()));
 }
 
