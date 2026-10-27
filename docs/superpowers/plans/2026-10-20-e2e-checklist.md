@@ -29,6 +29,7 @@
 - [x] 构建成功（71.9MB → 打包后 69MB）
 - [x] Info.plist 版本 2.0.0、universal binary、rathole bundle 已入 Resources
 - [x] 启动冒烟：进程稳定运行、窗口 800×632 正常创建、退出无孤儿进程
+- [x] **白屏修复**（RustLib.init 必须先于 runApp——provider 树同步读 rust 配置）+ 窗口截图确认登录页渲染正常
 - [x] e2e 真实链路回归（crate 重命名后 `e2e_local_test` 仍绿）
 
 ```bash
