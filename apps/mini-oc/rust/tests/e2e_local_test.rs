@@ -3,8 +3,8 @@
 //! 前置：PATH 上有 opencode。CI/无 opencode 环境自动跳过。
 //! 覆盖：start_local（真进程+真探针）→ list_projects/list_sessions（真 API）→ 终端计划生成。
 
-use mini_oc_app::api::{list_projects_at, list_sessions_at, resolve_opencode_bin};
-use mini_oc_app::supervisor::{SupConfig, Supervisor};
+use rust_lib_mini_oc::api::{list_projects_at, list_sessions_at, resolve_opencode_bin};
+use rust_lib_mini_oc::supervisor::{SupConfig, Supervisor};
 
 fn opencode_available() -> bool {
     std::process::Command::new("opencode")
@@ -75,7 +75,7 @@ async fn e2e_local_serve_projects_and_terminal_plan() {
 
     // 终端启动计划（凭据零泄露）
     let dir = tempfile::tempdir().unwrap();
-    let plan = mini_oc_app::term_spawn::build_terminal_plan(
+    let plan = rust_lib_mini_oc::term_spawn::build_terminal_plan(
         &resolve_opencode_bin(),
         &format!("http://127.0.0.1:{port}"),
         &projects[0].path,

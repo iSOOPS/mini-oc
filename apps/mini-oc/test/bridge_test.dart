@@ -9,11 +9,11 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   // flutter test 的 Dart VM 不触发 cargokit 构建——直接加载预构建 dylib。
-  // （cargo build 在 apps/mini-oc/rust 产出 target/debug/libmini_oc_app.dylib）
+  // （cargo build 在 apps/mini-oc/rust 产出 target/debug/librust_lib_mini_oc.dylib）
   setUpAll(() async {
     final candidates = [
-      '../rust/target/debug/libmini_oc_app.dylib',
-      'rust/target/debug/libmini_oc_app.dylib',
+      '../rust/target/debug/librust_lib_mini_oc.dylib',
+      'rust/target/debug/librust_lib_mini_oc.dylib',
     ];
     final path = candidates.firstWhere(
       (c) => File(c).existsSync(),

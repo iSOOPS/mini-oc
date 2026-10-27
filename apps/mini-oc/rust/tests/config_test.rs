@@ -1,6 +1,6 @@
 //! Task 2：本地配置持久化测试。
 
-use mini_oc_app::config::{load_config_from, save_config_to, ClientConfig, StoredUser};
+use rust_lib_mini_oc::config::{load_config_from, save_config_to, ClientConfig, StoredUser};
 
 fn sample() -> ClientConfig {
     ClientConfig {

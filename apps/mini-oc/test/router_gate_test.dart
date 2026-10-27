@@ -14,8 +14,8 @@ void main() {
   setUpAll(() async {
     // Rust 桥接（AuthNotifier.build 冷启动会读本地配置）
     final candidates = [
-      '../rust/target/debug/libmini_oc_app.dylib',
-      'rust/target/debug/libmini_oc_app.dylib',
+      '../rust/target/debug/librust_lib_mini_oc.dylib',
+      'rust/target/debug/librust_lib_mini_oc.dylib',
     ];
     final path = candidates.firstWhere((c) => File(c).existsSync(), orElse: () => candidates.first);
     await RustLib.init(externalLibrary: ExternalLibrary.open(path));

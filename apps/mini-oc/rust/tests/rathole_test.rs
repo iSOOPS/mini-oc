@@ -1,7 +1,7 @@
 //! Task 3：rathole 配置生成与二进制定位测试。
 
-use mini_oc_app::account::DeviceBrief;
-use mini_oc_app::rathole::{rathole_toml, resolve_rathole_bin};
+use rust_lib_mini_oc::account::DeviceBrief;
+use rust_lib_mini_oc::rathole::{rathole_toml, resolve_rathole_bin};
 
 fn device(public_url: &str) -> DeviceBrief {
     DeviceBrief {

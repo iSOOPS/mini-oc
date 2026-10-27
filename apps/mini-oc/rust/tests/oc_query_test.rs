@@ -1,6 +1,6 @@
 //! Task 6：本地 serve 查询测试（wiremock 伪 serve）。
 
-use mini_oc_app::api::{list_projects_at, list_sessions_at};
+use rust_lib_mini_oc::api::{list_projects_at, list_sessions_at};
 use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 

@@ -1,9 +1,9 @@
 //! 修复 pass 补充：I4（子进程 stdout 接入日志）与 I7（rathole toml 权限）。
 
-use mini_oc_app::logbuf::{push_log, recent_logs, clear_logs};
-use mini_oc_app::rathole::{rathole_toml, write_settings_toml};
-use mini_oc_app::account::DeviceBrief;
-use mini_oc_app::supervisor::{SupConfig, Supervisor};
+use rust_lib_mini_oc::logbuf::{push_log, recent_logs, clear_logs};
+use rust_lib_mini_oc::rathole::{rathole_toml, write_settings_toml};
+use rust_lib_mini_oc::account::DeviceBrief;
+use rust_lib_mini_oc::supervisor::{SupConfig, Supervisor};
 use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 

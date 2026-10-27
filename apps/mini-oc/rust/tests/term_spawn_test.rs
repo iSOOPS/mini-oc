@@ -1,11 +1,11 @@
 //! Task 6：终端启动器测试——凭据零泄露契约。
 
-use mini_oc_app::term_spawn::{build_terminal_plan, cleanup_env_files};
+use rust_lib_mini_oc::term_spawn::{build_terminal_plan, cleanup_env_files};
 
 const KEY: &str = "supersecretkey1234567890ABCDEF";
 
 #[cfg(unix)]
-fn plan(session: Option<&str>) -> (mini_oc_app::term_spawn::TerminalPlan, tempfile::TempDir) {
+fn plan(session: Option<&str>) -> (rust_lib_mini_oc::term_spawn::TerminalPlan, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let p = build_terminal_plan(
         "opencode",

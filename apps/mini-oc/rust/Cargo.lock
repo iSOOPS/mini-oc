@@ -955,27 +955,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
-name = "mini-oc-app"
-version = "2.0.0"
-dependencies = [
- "chrono",
- "filetime",
- "flutter_rust_bridge",
- "mini-oc-core",
- "nix",
- "reqwest",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 1.0.69",
- "tokio",
- "toml",
- "tracing",
- "whoami",
- "wiremock",
-]
-
-[[package]]
 name = "mini-oc-core"
 version = "2.0.0"
 dependencies = [
@@ -1366,6 +1345,27 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "rust_lib_mini_oc"
+version = "2.0.0"
+dependencies = [
+ "chrono",
+ "filetime",
+ "flutter_rust_bridge",
+ "mini-oc-core",
+ "nix",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "toml",
+ "tracing",
+ "whoami",
+ "wiremock",
 ]
 
 [[package]]

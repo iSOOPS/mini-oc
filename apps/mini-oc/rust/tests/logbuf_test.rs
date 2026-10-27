@@ -2,7 +2,7 @@
 //!
 //! LogBuffer 是全局单例（生产语义）——测试经全局 Mutex 串行避免串扰。
 
-use mini_oc_app::logbuf::{push_log, recent_logs, clear_logs, subscribe_logs_channel, flush_now};
+use rust_lib_mini_oc::logbuf::{push_log, recent_logs, clear_logs, subscribe_logs_channel, flush_now};
 use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -100,7 +100,7 @@ async fn incremental_flush_no_duplicates() {
     assert_eq!(batch2[1].message, "n3");
 }
 
-async fn drain(rx: &mut tokio::sync::mpsc::UnboundedReceiver<mini_oc_app::logbuf::LogLine>) -> Vec<mini_oc_app::logbuf::LogLine> {
+async fn drain(rx: &mut tokio::sync::mpsc::UnboundedReceiver<rust_lib_mini_oc::logbuf::LogLine>) -> Vec<rust_lib_mini_oc::logbuf::LogLine> {
     let mut out = Vec::new();
     let deadline = std::time::Instant::now() + Duration::from_millis(300);
     while std::time::Instant::now() < deadline {

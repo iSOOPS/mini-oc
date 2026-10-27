@@ -1,5 +1,5 @@
 [package]
-name = "mini-oc-app"
+name = "rust_lib_mini_oc"
 version = "2.0.0"
 edition = "2021"
 

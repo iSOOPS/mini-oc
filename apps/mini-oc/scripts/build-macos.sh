@@ -1,6 +1,6 @@
 #!/bin/bash
-# mini-oc macOS release 打包（需 Xcode + Flutter SDK）
-# 产物：build/macos/Build/Products/Release/mini_oc.app（内嵌 rust dylib 与 rathole bundle）
+# mini-oc macOS release 打包（需 Xcode + Flutter SDK + Homebrew CocoaPods）
+# 产物：build/macos/Build/Products/Release/mini_oc.app（universal binary + rathole bundle）
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -10,8 +10,11 @@ export FLUTTER_STORAGE_BASE_URL="${FLUTTER_STORAGE_BASE_URL:-https://storage.flu
 echo "==> frb codegen"
 flutter_rust_bridge_codegen generate
 
+echo "==> pod install（清 rvm GEM 环境污染）"
+(cd macos && env -u GEM_HOME -u GEM_PATH pod install)
+
 echo "==> flutter build macos --release"
-flutter build macos --release
+env -u GEM_HOME -u GEM_PATH flutter build macos --release
 
 APP="build/macos/Build/Products/Release/mini_oc.app"
 if [ ! -d "$APP" ]; then

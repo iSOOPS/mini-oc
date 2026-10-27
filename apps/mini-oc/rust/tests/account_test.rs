@@ -2,7 +2,7 @@
 //!
 //! 注意：MINI_OC_HOME 是进程级 env——所有测试经全局 Mutex 串行，避免并行竞态。
 
-use mini_oc_app::account::{bind_device, login, logout};
+use rust_lib_mini_oc::account::{bind_device, login, logout};
 use std::sync::{Mutex, MutexGuard};
 use wiremock::matchers::{body_partial_json, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -61,7 +61,7 @@ async fn login_ok_stores_user_and_returns_devices() {
     assert_eq!(info.devices[0].port, 9464);
     server.verify().await;
     // 用户已存入本地配置
-    let cfg = mini_oc_app::config::load_config();
+    let cfg = rust_lib_mini_oc::config::load_config();
     let user = cfg.user.expect("登录后 user 已持久化");
     assert_eq!(user.id, "100001");
     assert_eq!(cfg.server_url, server.uri());
@@ -71,9 +71,9 @@ async fn login_ok_stores_user_and_returns_devices() {
 async fn login_failure_keeps_existing_config_untouched() {
     let (server, _guard) = setup().await;
     // 预置已登录状态
-    mini_oc_app::config::save_config(&mini_oc_app::config::ClientConfig {
+    rust_lib_mini_oc::config::save_config(&rust_lib_mini_oc::config::ClientConfig {
         server_url: "https://old.example.com".into(),
-        user: Some(mini_oc_app::config::StoredUser {
+        user: Some(rust_lib_mini_oc::config::StoredUser {
             id: "100000".into(),
             name: "old".into(),
             key: "old".repeat(8),
@@ -93,7 +93,7 @@ async fn login_failure_keeps_existing_config_untouched() {
     let err = login(&server.uri(), "wrongkey").await.unwrap_err();
     assert!(err.contains("密钥") || err.contains("401"), "错误信息: {err}");
     // 旧配置未被污染
-    let cfg = mini_oc_app::config::load_config();
+    let cfg = rust_lib_mini_oc::config::load_config();
     assert_eq!(cfg.server_url, "https://old.example.com", "登录失败不改配置");
     assert_eq!(cfg.user.unwrap().id, "100000");
 }
@@ -101,9 +101,9 @@ async fn login_failure_keeps_existing_config_untouched() {
 #[tokio::test]
 async fn bind_device_success_writes_bound_device() {
     let (server, _guard) = setup().await;
-    mini_oc_app::config::save_config(&mini_oc_app::config::ClientConfig {
+    rust_lib_mini_oc::config::save_config(&rust_lib_mini_oc::config::ClientConfig {
         server_url: server.uri(),
-        user: Some(mini_oc_app::config::StoredUser {
+        user: Some(rust_lib_mini_oc::config::StoredUser {
             id: "100001".into(),
             name: "samuel".into(),
             key: "k123456789012345678901234567890a".into(),
@@ -129,7 +129,7 @@ async fn bind_device_success_writes_bound_device() {
     bind_device("macbook-pro", "macos", "macos").await.unwrap();
     server.verify().await;
     assert_eq!(
-        mini_oc_app::config::load_config().bound_device.as_deref(),
+        rust_lib_mini_oc::config::load_config().bound_device.as_deref(),
         Some("macbook-pro")
     );
 }
@@ -137,9 +137,9 @@ async fn bind_device_success_writes_bound_device() {
 #[tokio::test]
 async fn bind_device_os_mismatch_returns_clear_error() {
     let (server, _guard) = setup().await;
-    mini_oc_app::config::save_config(&mini_oc_app::config::ClientConfig {
+    rust_lib_mini_oc::config::save_config(&rust_lib_mini_oc::config::ClientConfig {
         server_url: server.uri(),
-        user: Some(mini_oc_app::config::StoredUser {
+        user: Some(rust_lib_mini_oc::config::StoredUser {
             id: "100001".into(),
             name: "samuel".into(),
             key: "k123456789012345678901234567890a".into(),
@@ -164,9 +164,9 @@ fn logout_clears_user_keeps_server() {
     let _guard = Guard::acquire();
     let dir = tempfile::tempdir().unwrap();
     std::env::set_var("MINI_OC_HOME", dir.path());
-    mini_oc_app::config::save_config(&mini_oc_app::config::ClientConfig {
+    rust_lib_mini_oc::config::save_config(&rust_lib_mini_oc::config::ClientConfig {
         server_url: "https://oc.example.com".into(),
-        user: Some(mini_oc_app::config::StoredUser {
+        user: Some(rust_lib_mini_oc::config::StoredUser {
             id: "1".repeat(6),
             name: "x".into(),
             key: "k".repeat(32),
@@ -176,7 +176,7 @@ fn logout_clears_user_keeps_server() {
     })
     .unwrap();
     logout().unwrap();
-    let cfg = mini_oc_app::config::load_config();
+    let cfg = rust_lib_mini_oc::config::load_config();
     assert!(cfg.user.is_none());
     assert!(cfg.bound_device.is_none());
     assert_eq!(cfg.server_url, "https://oc.example.com", "服务器地址保留");

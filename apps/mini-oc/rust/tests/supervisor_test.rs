@@ -1,6 +1,6 @@
 //! Task 4：进程监督状态机测试（/bin/sleep 替身 + 注入探针）。
 
-use mini_oc_app::supervisor::{SupConfig, Supervisor};
+use rust_lib_mini_oc::supervisor::{SupConfig, Supervisor};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
