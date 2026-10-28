@@ -392,6 +392,58 @@ async fn register_empty_desc_keeps_existing_desc() {
     assert_eq!(dev["port"], 9555);
 }
 
+/// ① 停用设备重上报：register 匹配不过滤 enabled → approved + enabled:false，事实字段照常更新。
+///
+/// 这是 Task 6（admin 停用）× Task 3（register）交叉 seam 的护栏：停用后客户端
+/// 仍会上报（本地已持久化 deviceId），register 必须如实返回停用态，不得绕过
+/// admin 审批把停用设备「复活」为启用，也不得把上报误判为 pending。
+#[tokio::test]
+async fn register_disabled_device_returns_approved_disabled() {
+    let sb = MockServer::start().await;
+    let mut user = test_user();
+    user.devices[0].enabled = false;
+    user.devices[0].device_id = "3f2b8a44-1c5d-4e6f-9a8b-7c2d1e0f9a8b".into();
+    mount_stateful_sb(
+        &sb,
+        UsersFile {
+            version: 2,
+            users: vec![user.clone()],
+        },
+    )
+    .await;
+    let base = spawn_app(&sb).await;
+
+    // 客户端已持久化 deviceId → 命中分支①，不落入 pending
+    let resp = register(
+        &base,
+        &reg_body(
+            &user.key,
+            "3f2b8a44-1c5d-4e6f-9a8b-7c2d1e0f9a8b",
+            "停用机重上报",
+            9777,
+            "macos",
+            "Samuels-MacBook",
+            "macos",
+        ),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(
+        body["status"], "approved",
+        "分支①仍返回 approved 而非 pending"
+    );
+    assert_eq!(body["deviceId"], "3f2b8a44-1c5d-4e6f-9a8b-7c2d1e0f9a8b");
+    assert_eq!(body["enabled"], false, "响应必须如实携带停用态");
+
+    let users = admin_users(&base).await;
+    let dev = &users["users"][0]["devices"][0];
+    assert_eq!(dev["enabled"], false, "register 不得把停用设备复活");
+    assert_eq!(dev["port"], 9777, "事实字段照常更新");
+    assert_eq!(dev["desc"], "停用机重上报");
+    assert_eq!(dev["deviceName"], "Samuels-MacBook");
+}
+
 /// ⑤ os 与 pctype 不一致 → 400（同 device-bind 的平台一致性校验）。
 #[tokio::test]
 async fn register_rejects_os_mismatch() {

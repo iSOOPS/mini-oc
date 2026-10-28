@@ -414,10 +414,12 @@ async fn admin_device_approve(
     Ok(Json(serde_json::json!({"user": updated})))
 }
 
-/// PendingDevice 无 name 字段——全局唯一校验对 pending 取 desc 与 device_name 对照。
+/// PendingDevice 无 name 字段——全局唯一校验对 pending 仅以 desc 近似对照。
 ///
 /// 注：pending 阶段尚无 rathole 服务名，spec 校验范围要求「当前用户 pending_devices」
-/// 实指防止对同一批待审设备审核时撞名；此处以 desc（客户端可读标识）近似对照。
+/// 实指防止对同一批待审设备审核时撞名。desc 是客户端可读标识，仅作近似对照：
+/// 误报（desc 恰与新名相同而拒绝）可能性极低；漏报（desc 与将来定的 name 不同）
+/// 由审核通过后写入 devices 时走全量唯一校验兜底。
 fn p_desc_name(p: &mini_oc_core::device::PendingDevice) -> &str {
     &p.desc
 }
