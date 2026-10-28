@@ -24,6 +24,9 @@ pub enum AppError {
     NotFound(String),
     #[error("forbidden: {0}")]
     Forbidden(String),
+    /// 资源状态冲突（如启用中的设备不可删除）。
+    #[error("conflict: {0}")]
+    Conflict(String),
     #[error("rate limited")]
     RateLimited,
     #[error("service unavailable: {0}")]
@@ -41,6 +44,7 @@ pub enum ErrorCode {
     PairUrlInvalid,
     NotFound,
     Forbidden,
+    Conflict,
     RateLimited,
     ServiceUnavailable,
     Internal,
@@ -56,6 +60,7 @@ impl ErrorCode {
             ErrorCode::PairUrlInvalid => "pair_url_invalid",
             ErrorCode::NotFound => "not_found",
             ErrorCode::Forbidden => "forbidden",
+            ErrorCode::Conflict => "conflict",
             ErrorCode::RateLimited => "rate_limited",
             ErrorCode::ServiceUnavailable => "service_unavailable",
             ErrorCode::Internal => "internal",
@@ -73,6 +78,7 @@ impl AppError {
             AppError::PairUrlInvalid(_) => ErrorCode::PairUrlInvalid,
             AppError::NotFound(_) => ErrorCode::NotFound,
             AppError::Forbidden(_) => ErrorCode::Forbidden,
+            AppError::Conflict(_) => ErrorCode::Conflict,
             AppError::RateLimited => ErrorCode::RateLimited,
             AppError::ServiceUnavailable(_) => ErrorCode::ServiceUnavailable,
             AppError::Internal(_) => ErrorCode::Internal,
@@ -88,6 +94,7 @@ impl AppError {
             AppError::PairUrlInvalid(_) => 502,
             AppError::NotFound(_) => 404,
             AppError::Forbidden(_) => 403,
+            AppError::Conflict(_) => 409,
             AppError::RateLimited => 429,
             AppError::ServiceUnavailable(_) => 503,
             AppError::Internal(_) => 500,
@@ -132,3 +139,14 @@ impl axum::response::IntoResponse for AppError {
 }
 
 pub type AppResult<T> = Result<T, AppError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn conflict_maps_to_409() {
+        assert_eq!(AppError::Conflict("x".into()).status(), 409);
+        assert_eq!(AppError::Conflict("x".into()).code().as_str(), "conflict");
+    }
+}
