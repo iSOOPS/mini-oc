@@ -189,6 +189,8 @@ fn validate_rules() {
         device_name: "Samuels-MacBook".into(),
         bound: true,
         public_url: "https://oc.example.com".into(),
+        enabled: true,
+        device_id: String::new(),
     };
     assert!(good.validate().is_ok());
 
@@ -216,6 +218,7 @@ fn user_validate_rules() {
         name: "samuel".into(),
         key: "k123456789012345678901234567890a".into(),
         devices: vec![],
+        pending_devices: vec![],
         created_at: "2026-09-01T00:00:00Z".into(),
         updated_at: "2026-09-01T00:00:00Z".into(),
         last_used_at: None,
@@ -244,4 +247,35 @@ fn generate_key_format() {
     assert_eq!(key.len(), 32);
     assert!(key.chars().all(|c| c.is_ascii_alphanumeric()));
     assert_ne!(generate_key(), generate_key(), "两次生成不得相同");
+}
+
+#[test]
+fn old_json_keeps_existing_devices_enabled() {
+    // 旧格式 JSON：无 enabled/device_id/pending_devices 字段
+    let raw = r#"{"version":2,"users":[{"id":"100001","name":"samuel","key":"testkey1234567890abcdefghij12345","devices":[{"desc":"工作机","name":"macbook-pro","port":9464,"pctype":"macos","publicUrl":"https://t.example.com"}],"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}]}"#;
+    let f: UsersFile = serde_json::from_str(raw).unwrap();
+    let d = &f.users[0].devices[0];
+    assert!(d.enabled, "缺省 enabled 必须为 true");
+    assert_eq!(d.device_id, "");
+    assert!(f.users[0].pending_devices.is_empty());
+}
+
+#[test]
+fn pending_device_validate() {
+    let mut p = PendingDevice { device_id: generate_device_id(), desc: String::new(), port: 9464, pctype: "macos".into(), device_name: "Mac".into(), reported_at: "2026-10-28T00:00:00Z".into() };
+    assert!(p.validate().is_ok());
+    p.pctype = "linux".into();
+    assert!(p.validate().is_err());
+    p.pctype = "macos".into();
+    p.port = 0;
+    assert!(p.validate().is_err());
+}
+
+#[test]
+fn generate_device_id_is_uuid_v4() {
+    let id = generate_device_id();
+    assert_eq!(id.len(), 36);
+    assert_eq!(char::from(id.as_bytes()[14]), '4'); // version nibble
+    let c = char::from(id.as_bytes()[19]); // variant nibble
+    assert!(c == '8' || c == '9' || c == 'a' || c == 'b');
 }

@@ -8,6 +8,11 @@
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
+/// serde 缺省值：true（`enabled` 缺省必须为 true，否则存量设备会被批量解读为停用）。
+fn default_true() -> bool {
+    true
+}
+
 /// 单台用户设备（对应一条 rathole 隧道 + 设备端 opencode serve）。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -28,6 +33,13 @@ pub struct UserDevice {
     pub bound: bool,
     /// 隧道公网地址 scheme://host[:port]（超管录入）
     pub public_url: String,
+    /// 启用状态：false = 停用（不下发、不探测、不可 jump）。
+    /// 缺省解读为 true（存量设备不受影响）。
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// 设备唯一 ID（UUID，服务端首次上报时生成）；旧数据为空串，客户端重新上报时回填。
+    #[serde(default)]
+    pub device_id: String,
 }
 
 impl UserDevice {
@@ -46,6 +58,44 @@ impl UserDevice {
         }
         if !valid_public_url(&self.public_url) {
             return Err("public_url 须为 http(s)://host[:port] 且不含路径".into());
+        }
+        Ok(())
+    }
+}
+
+/// 待审核设备（客户端主动上报、管理员审核前暂存）。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingDevice {
+    /// UUID，服务端生成
+    pub device_id: String,
+    /// 客户端上报的描述（可空串）
+    pub desc: String,
+    /// 客户端 opencode 端口
+    pub port: u16,
+    /// 平台：macos / windows
+    pub pctype: String,
+    /// 主机名
+    pub device_name: String,
+    /// RFC3339 最近一次上报时间
+    pub reported_at: String,
+}
+
+impl PendingDevice {
+    /// 字段白名单校验，返回 Err(原因说明)。
+    pub fn validate(&self) -> Result<(), String> {
+        if self.port == 0 {
+            return Err("port 须大于 0".into());
+        }
+        if self.pctype != "macos" && self.pctype != "windows" {
+            return Err("pctype 须为 macos 或 windows".into());
+        }
+        let name_len = self.device_name.chars().count();
+        if !(1..=128).contains(&name_len) {
+            return Err("device_name 长度须为 1-128 字".into());
+        }
+        if self.desc.chars().count() > 64 {
+            return Err("desc 长度须不超过 64 字".into());
         }
         Ok(())
     }
@@ -81,6 +131,9 @@ pub struct PortalUser {
     /// 32 位密钥（全链路唯一凭据）
     pub key: String,
     pub devices: Vec<UserDevice>,
+    /// 待审核设备（客户端上报、管理员审核前的暂存区）
+    #[serde(default)]
+    pub pending_devices: Vec<PendingDevice>,
     pub created_at: String,
     pub updated_at: String,
     pub last_used_at: Option<String>,
@@ -217,6 +270,8 @@ pub fn migrate_v1(raw: &str) -> Result<UsersFile, String> {
                     device_name,
                     bound,
                     public_url,
+                    enabled: true,
+                    device_id: String::new(),
                 },
                 V1DeviceWire::Legacy(name) => {
                     tracing::warn!(user = %u.id, device = %name, "跳过裸字符串 legacy 设备（信息不全，不可用）");
@@ -244,6 +299,7 @@ pub fn migrate_v1(raw: &str) -> Result<UsersFile, String> {
             name: u.name,
             key: u.key,
             devices,
+            pending_devices: vec![],
             created_at: u.created_at,
             updated_at: u.updated_at,
             last_used_at: u.last_used_at,
@@ -281,4 +337,20 @@ pub fn generate_key() -> String {
     (0..32)
         .map(|_| CHARSET[rng.gen_range(0..CHARSET.len())] as char)
         .collect()
+}
+
+/// 生成设备唯一 ID（RFC 4122 v4 UUID 格式）。
+///
+/// 不引入 `uuid` crate：16 字节随机 + 版本位（4）与 RFC 变体位，连字符格式化。
+pub fn generate_device_id() -> String {
+    let mut bytes: [u8; 16] = rand::random();
+    // 版本位：高 4 字节的高 4 bit 置为 0100（v4）
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    // 变体位：RFC 4122，高 2 bit 置为 10
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]
+    )
 }

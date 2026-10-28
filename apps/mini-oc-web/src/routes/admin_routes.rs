@@ -147,6 +147,7 @@ async fn admin_users_create(
         name: body.name,
         key: generate_key(),
         devices,
+        pending_devices: vec![],
         created_at: now.clone(),
         updated_at: now,
         last_used_at: None,
