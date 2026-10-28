@@ -248,3 +248,23 @@ async fn report_registration_server_error_degrades_silently() {
     // 失败不写 device_id
     assert_eq!(rust_lib_mini_oc::config::load_config().device_id, None);
 }
+
+#[tokio::test]
+async fn report_registration_empty_device_id_not_persisted() {
+    let (server, _guard) = setup().await;
+    seed_logged_in_config(&server.uri(), None);
+    // 异常响应：approved 但 deviceId 为空（服务端 bug 防御）
+    Mock::given(method("POST"))
+        .and(path("/api/device-register"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "status": "approved", "deviceId": "", "enabled": true
+        })))
+        .mount(&server)
+        .await;
+
+    let out = report_registration().await;
+    assert!(out.ok);
+    assert_eq!(out.device_id, "");
+    // 空 deviceId 不落盘（避免 Some("") 污染 config）
+    assert_eq!(rust_lib_mini_oc::config::load_config().device_id, None);
+}

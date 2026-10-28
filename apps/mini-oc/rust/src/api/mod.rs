@@ -222,9 +222,11 @@ pub async fn report_registration() -> ReportOutcome {
     };
     match inner.await {
         Ok(result) => {
-            // 响应 deviceId 与 config 不同 → 写回（save_config 本身是原子替换）
+            // 响应 deviceId 与 config 不同 → 写回（save_config 本身是原子替换；空 deviceId 视为异常响应不写）
             let mut cfg = crate::config::load_config();
-            if cfg.device_id.as_deref() != Some(result.device_id.as_str()) {
+            if !result.device_id.is_empty()
+                && cfg.device_id.as_deref() != Some(result.device_id.as_str())
+            {
                 cfg.device_id = Some(result.device_id.clone());
                 if let Err(e) = crate::config::save_config(&cfg) {
                     tracing::warn!("device_id 写回配置失败: {e}");
