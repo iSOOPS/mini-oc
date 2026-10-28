@@ -58,7 +58,7 @@ function statusText(status?: DeviceStatus) {
     </div>
 
     <div v-if="!auth.loading && auth.devices.length === 0" class="card empty">
-      暂无设备——请联系管理员在用户配置中添加。
+      暂无设备——请在客户端设置页上报设备
     </div>
   </div>
 </template>

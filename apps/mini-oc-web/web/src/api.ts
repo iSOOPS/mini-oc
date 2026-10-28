@@ -65,11 +65,26 @@ export interface DualSource<T> {
   data: T[]
 }
 
+export interface AdminDevice extends Device {
+  enabled: boolean
+  deviceId: string
+}
+
+export interface PendingDevice {
+  deviceId: string
+  desc: string
+  port: number
+  pctype: string
+  deviceName: string
+  reportedAt: string
+}
+
 export interface AdminUser {
   id: string
   name: string
   key: string
-  devices: Device[]
+  devices: AdminDevice[]
+  pendingDevices: PendingDevice[]
   createdAt: string
   updatedAt: string
 }
@@ -100,12 +115,18 @@ export const api = {
     request<{ ok: boolean }>('/api/admin/login', { method: 'POST', body: JSON.stringify({ password }) }, { on401: 'passthrough' }),
   adminLogout: () => request<{ ok: boolean }>('/api/admin/logout', { method: 'POST' }),
   adminUsers: () => request<{ users: AdminUser[] }>('/api/admin/users'),
-  adminCreateUser: (body: { name: string; devices: Partial<Device>[] }) =>
+  adminCreateUser: (body: { name: string }) =>
     request<{ user: AdminUser }>('/api/admin/users', { method: 'POST', body: JSON.stringify(body) }),
-  adminUpdateUser: (id: string, body: Record<string, unknown>) =>
+  adminUpdateUser: (id: string, body: { name?: string; devices?: { deviceId: string; name?: string; publicUrl?: string; enabled?: boolean }[] }) =>
     request<{ user: AdminUser }>(`/api/admin/users/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   adminDeleteUser: (id: string) =>
     request<{ ok: boolean }>(`/api/admin/users/${id}`, { method: 'DELETE' }),
   adminRegenerateKey: (id: string) =>
     request<{ key: string }>(`/api/admin/users/${id}/regenerate-key`, { method: 'POST' }),
+  adminApproveDevice: (uid: string, did: string, body: { name: string; publicUrl: string }) =>
+    request<{ user: AdminUser }>(`/api/admin/users/${uid}/devices/${did}/approve`, { method: 'POST', body: JSON.stringify(body) }),
+  adminRejectDevice: (uid: string, did: string) =>
+    request<{ ok: boolean }>(`/api/admin/users/${uid}/devices/${did}/reject`, { method: 'DELETE' }),
+  adminDeleteDevice: (uid: string, did: string) =>
+    request<{ ok: boolean }>(`/api/admin/users/${uid}/devices/${did}`, { method: 'DELETE' }),
 }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { api, type AdminUser, type Device } from '../api'
+import { api, type AdminDevice, type AdminUser, type PendingDevice } from '../api'
 
 const users = ref<AdminUser[]>([])
 const busy = ref(false)
@@ -10,7 +10,15 @@ const error = ref('')
 const showForm = ref(false)
 const editingId = ref<string | null>(null)
 const formName = ref('')
-const formDevices = ref<Partial<Device>[]>([])
+
+// 编辑态下的设备编辑草稿（拷贝自用户数据，保存时按白名单字段提交）
+const editDevices = ref<AdminDevice[]>([])
+
+// 待审核折叠区展开状态（key：用户 id）
+const expandedPending = ref<Record<string, boolean>>({})
+
+// 「同意」小表单状态（key：pendingDevice.deviceId）
+const approveForm = ref<Record<string, { open: boolean; name: string; publicUrl: string }>>({})
 
 // 密钥一次性展示面板
 const keyPanel = ref<{ name: string; key: string } | null>(null)
@@ -32,19 +40,14 @@ async function load() {
 function openCreate() {
   editingId.value = null
   formName.value = ''
-  formDevices.value = [emptyDevice()]
   showForm.value = true
 }
 
 function openEdit(u: AdminUser) {
   editingId.value = u.id
   formName.value = u.name
-  formDevices.value = u.devices.map((d) => ({ ...d }))
+  editDevices.value = u.devices.map((d) => ({ ...d }))
   showForm.value = true
-}
-
-function emptyDevice(): Partial<Device> {
-  return { desc: '', name: '', port: 9464, pctype: 'macos', publicUrl: '', bound: false, deviceName: '' }
 }
 
 async function saveForm() {
@@ -53,19 +56,88 @@ async function saveForm() {
     if (editingId.value) {
       await api.adminUpdateUser(editingId.value, {
         name: formName.value,
-        devices: formDevices.value,
+        devices: editDevices.value.map((d) => ({
+          deviceId: d.deviceId,
+          name: d.name,
+          publicUrl: d.publicUrl,
+          enabled: d.enabled,
+        })),
       })
     } else {
-      const r = await api.adminCreateUser({
-        name: formName.value,
-        devices: formDevices.value,
-      })
+      const r = await api.adminCreateUser({ name: formName.value })
       keyPanel.value = { name: r.user.name, key: r.user.key }
     }
     showForm.value = false
     await load()
   } catch (e: any) {
     error.value = e?.message ?? '保存失败'
+  }
+}
+
+// 编辑表单内的启用开关（仅改草稿，保存时统一提交）
+function toggleEditDevice(d: AdminDevice) {
+  d.enabled = !d.enabled
+}
+
+async function toggleEnabled(uid: string, d: AdminDevice) {
+  error.value = ''
+  try {
+    await api.adminUpdateUser(uid, {
+      devices: [{ deviceId: d.deviceId, enabled: !d.enabled }],
+    })
+    await load()
+  } catch (e: any) {
+    error.value = e?.message ?? '操作失败'
+  }
+}
+
+async function removeDevice(u: AdminUser, d: AdminDevice) {
+  if (!confirm(`移除设备 ${d.name}（${d.desc || d.deviceName}）？不可恢复。`)) return
+  error.value = ''
+  try {
+    await api.adminDeleteDevice(u.id, d.deviceId)
+    await load()
+  } catch (e: any) {
+    error.value = e?.message ?? '移除失败'
+  }
+}
+
+function togglePending(u: AdminUser) {
+  expandedPending.value[u.id] = !expandedPending.value[u.id]
+}
+
+function openApproveForm(p: PendingDevice) {
+  approveForm.value[p.deviceId] = { open: true, name: '', publicUrl: '' }
+}
+
+function closeApproveForm(p: PendingDevice) {
+  delete approveForm.value[p.deviceId]
+}
+
+async function approvePending(u: AdminUser, p: PendingDevice) {
+  const f = approveForm.value[p.deviceId]
+  if (!f || !f.name.trim() || !f.publicUrl.trim()) return
+  error.value = ''
+  try {
+    await api.adminApproveDevice(u.id, p.deviceId, {
+      name: f.name.trim(),
+      publicUrl: f.publicUrl.trim(),
+    })
+    closeApproveForm(p)
+    await load()
+  } catch (e: any) {
+    error.value = e?.message ?? '同意失败'
+  }
+}
+
+async function rejectPending(u: AdminUser, p: PendingDevice) {
+  if (!confirm(`拒绝设备 ${p.deviceName}（${p.desc || '无描述'}）的上报？`)) return
+  error.value = ''
+  try {
+    await api.adminRejectDevice(u.id, p.deviceId)
+    await load()
+  } catch (e: any) {
+    error.value = e?.message ?? '拒绝失败'
   }
 }
 
@@ -83,10 +155,23 @@ async function remove(u: AdminUser) {
 }
 
 // 穿透地址输入预处理：剥协议/路径（V1 peelTunnelInput 行为）
-function peel(v: Partial<Device>) {
-  const raw = (v.publicUrl ?? '').trim()
+function peelStr(v: string): string {
+  const raw = (v ?? '').trim()
   const m = raw.match(/^(https?:\/\/)?([^/\s]+).*/i)
-  v.publicUrl = m ? `${m[1] ?? 'https://'}${m[2]}` : raw
+  return m ? `${m[1] ?? 'https://'}${m[2]}` : raw
+}
+
+function peel(d: { publicUrl: string }) {
+  d.publicUrl = peelStr(d.publicUrl)
+}
+
+function approveField(p: PendingDevice, field: 'name' | 'publicUrl'): string {
+  return approveForm.value[p.deviceId]?.[field] ?? ''
+}
+
+function setApproveField(p: PendingDevice, field: 'name' | 'publicUrl', v: string) {
+  const f = approveForm.value[p.deviceId]
+  if (f) f[field] = v
 }
 </script>
 
@@ -113,21 +198,23 @@ function peel(v: Partial<Device>) {
       <label>用户名（字母数字 _ -）</label>
       <input v-model="formName" placeholder="如 samuel" />
 
-      <h4>设备清单</h4>
-      <div v-for="(d, i) in formDevices" :key="i" class="device-row">
-        <div class="grid">
-          <div><label>描述</label><input v-model="d.desc" placeholder="工作电脑" /></div>
-          <div><label>服务名（rathole，小写-）</label><input v-model="d.name" placeholder="macbook-pro" /></div>
-          <div>
-            <label>平台</label>
-            <select v-model="d.pctype"><option>macos</option><option>windows</option></select>
+      <template v-if="editingId">
+        <h4>设备清单（只读项由客户端上报维护）</h4>
+        <div v-for="d in editDevices" :key="d.deviceId || d.name" class="device-row">
+          <div class="grid">
+            <div><label>描述（客户端上报）</label><input :value="d.desc" readonly /></div>
+            <div><label>服务名</label><input v-model="d.name" placeholder="macbook-pro" /></div>
+            <div><label>平台（客户端上报）</label><input :value="d.pctype" readonly /></div>
+            <div><label>端口（客户端上报）</label><input :value="d.port" readonly /></div>
+            <div><label>主机名（客户端上报）</label><input :value="d.deviceName" readonly /></div>
+            <div><label>绑定状态</label><input :value="d.bound ? '已绑定' : '未绑定'" readonly /></div>
+            <div class="wide"><label>穿透地址（自动剥协议）</label><input v-model="d.publicUrl" @blur="peel(d)" placeholder="oc.example.com 或 http://1.2.3.4:9101" /></div>
           </div>
-          <div><label>opencode 端口</label><input v-model.number="d.port" type="number" /></div>
-          <div class="wide"><label>穿透地址（自动剥协议）</label><input v-model="d.publicUrl" @blur="peel(d)" placeholder="oc.example.com 或 http://1.2.3.4:9101" /></div>
+          <div class="row-actions">
+            <button class="btn ghost small" @click="toggleEditDevice(d)">{{ d.enabled ? '停用' : '启用' }}</button>
+          </div>
         </div>
-        <button v-if="formDevices.length > 1" class="btn ghost small" @click="formDevices.splice(i, 1)">移除</button>
-      </div>
-      <button class="btn ghost small" @click="formDevices.push(emptyDevice())">＋ 添加设备</button>
+      </template>
 
       <div class="form-actions">
         <button class="btn ghost" @click="showForm = false">取消</button>
@@ -150,6 +237,55 @@ function peel(v: Partial<Device>) {
       <p class="devs">
         设备（{{ u.devices.length }}）：{{ u.devices.map((d) => `${d.name}:${d.port}(${d.pctype})`).join('、') || '无' }}
       </p>
+
+      <div class="device-cards">
+        <div v-for="d in u.devices" :key="d.deviceId || d.name" class="device-card">
+          <div class="drow1">
+            <strong>{{ d.desc }}</strong>
+            <span class="dmeta">{{ d.name }}:{{ d.port }}（{{ d.pctype }}）· {{ d.deviceName || '未知主机' }} · {{ d.bound ? '已绑定' : '未绑定' }}</span>
+            <span v-if="!d.enabled" class="badge disabled">已停用</span>
+            <span v-else-if="d.bound" class="badge bound">已绑定</span>
+          </div>
+          <div class="dactions">
+            <button class="btn ghost small" @click="toggleEnabled(u.id, d)">{{ d.enabled ? '停用' : '启用' }}</button>
+            <button v-if="!d.enabled" class="btn danger small" @click="removeDevice(u, d)">移除</button>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="u.pendingDevices.length > 0" class="pending">
+        <button class="pending-toggle" @click="togglePending(u)">
+          待审核设备 ({{ u.pendingDevices.length }}) {{ expandedPending[u.id] ? '▾' : '▸' }}
+        </button>
+        <div v-if="expandedPending[u.id]" class="pending-list">
+          <div v-for="p in u.pendingDevices" :key="p.deviceId" class="pending-item">
+            <div class="pinfo">
+              <strong>{{ p.desc || p.deviceName }}</strong>
+              <span class="dmeta">{{ p.port }}（{{ p.pctype }}）· {{ p.deviceName }} · 上报于 {{ p.reportedAt }}</span>
+            </div>
+            <div class="pactions">
+              <button class="btn small" @click="openApproveForm(p)">同意</button>
+              <button class="btn ghost small" @click="rejectPending(u, p)">拒绝</button>
+            </div>
+            <div v-if="approveForm[p.deviceId]?.open" class="approve-form">
+              <div class="grid">
+                <div>
+                  <label>服务名（必填）</label>
+                  <input :value="approveField(p, 'name')" @input="setApproveField(p, 'name', ($event.target as HTMLInputElement).value)" placeholder="macbook-pro" />
+                </div>
+                <div>
+                  <label>穿透地址（必填，自动剥协议）</label>
+                  <input :value="approveField(p, 'publicUrl')" @blur="setApproveField(p, 'publicUrl', peelStr(approveField(p, 'publicUrl')))" @input="setApproveField(p, 'publicUrl', ($event.target as HTMLInputElement).value)" placeholder="oc.example.com" />
+                </div>
+              </div>
+              <div class="form-actions">
+                <button class="btn ghost small" @click="closeApproveForm(p)">取消</button>
+                <button class="btn small" :disabled="!approveField(p, 'name').trim() || !approveField(p, 'publicUrl').trim()" @click="approvePending(u, p)">确认同意</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div v-if="!busy && users.length === 0" class="card empty">暂无用户</div>
@@ -174,7 +310,23 @@ function peel(v: Partial<Device>) {
 .device-row { border-top: 1px dashed var(--surface-2); padding-top: 12px; display: flex; flex-direction: column; gap: 8px; }
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .grid .wide { grid-column: 1 / -1; }
+.row-actions { display: flex; gap: 8px; justify-content: flex-end; }
 .form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+.device-cards { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.device-card { border: 1px solid var(--surface-2); border-radius: 10px; padding: 10px 12px; display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.device-card .drow1 { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.dmeta { font-size: 12px; color: var(--text-2); word-break: break-all; }
+.dactions { display: flex; gap: 6px; margin-left: auto; }
+.badge { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 6px; align-self: flex-start; }
+.badge.disabled { background: var(--surface-2); color: var(--text-2); }
+.badge.bound { color: var(--green); }
+.pending { margin-top: 10px; }
+.pending-toggle { background: none; border: none; padding: 0; font-size: 14px; font-weight: 600; color: var(--orange); cursor: pointer; }
+.pending-list { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.pending-item { border: 1px dashed var(--surface-2); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.pending-item .pinfo { display: flex; flex-direction: column; gap: 2px; }
+.pending-item .pactions { display: flex; gap: 6px; }
+.approve-form { border-top: 1px dashed var(--surface-2); padding-top: 10px; display: flex; flex-direction: column; gap: 8px; }
 .empty { text-align: center; color: var(--text-2); padding: 28px; }
 .err { color: var(--red); }
 </style>
