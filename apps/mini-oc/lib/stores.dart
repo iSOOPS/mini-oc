@@ -193,15 +193,28 @@ final reportRegistrationFnProvider = Provider<ReportRegistrationFn>((ref) {
   return () => rust.reportRegistration();
 });
 
+/// 保存配置动作（可测试注入）：默认调 rust.saveConfig()。
+typedef SaveConfigFn = Future<void> Function({required ClientConfig cfg});
+final saveConfigFnProvider = Provider<SaveConfigFn>((ref) {
+  return ({required ClientConfig cfg}) => rust.saveConfig(cfg: cfg);
+});
+
 /// 最近一次设备上报结果（null = 本次会话尚未上报；内存态，不持久化，不做轮询）。
 class RegistrationNotifier extends Notifier<rust.ReportOutcome?> {
   @override
   rust.ReportOutcome? build() => null;
 
   /// 手动触发上报。永不抛出：失败结果（ok=false）也装入 state 供 UI 展示。
+  ///
+  /// 上报成功后（Rust 侧已把新 deviceId 写回 config.json）刷新 [rustCfgProvider]，
+  /// 避免设置页后续「保存设置」用陈旧快照把 deviceId 抹回旧值。
   Future<void> report() async {
     try {
-      state = await ref.read(reportRegistrationFnProvider)();
+      final outcome = await ref.read(reportRegistrationFnProvider)();
+      state = outcome;
+      if (outcome.ok) {
+        ref.invalidate(rustCfgProvider);
+      }
     } catch (_) {
       // Rust 侧承诺永不 panic，此处兜底防御（如桥接未初始化）
       state = rust.ReportOutcome(

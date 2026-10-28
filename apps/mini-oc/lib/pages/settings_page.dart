@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../stores.dart';
-import '../src/rust/api.dart' as rust;
 import '../src/rust/config.dart' show ClientConfig;
 
 /// 由表单值 + 当前配置构造新 ClientConfig（保存与测试共用，保证字段透传一致）。
@@ -51,7 +50,11 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   }
 
   Future<void> _save() async {
-    final cfg = ref.read(rustCfgProvider);
+    // 强制重算（= rust.loadConfig()），防止用陈旧快照覆盖 Rust 侧已写回的
+    // deviceId / user / boundDevice（如上报后 config.json 已更新而缓存未刷）。
+    // 测试 overrideWithValue / overrideWith 注入的值不受影响（Riverpod 对
+    // override 的 provider 跳过重算，refresh 返回注入值本身）。
+    final cfg = ref.refresh(rustCfgProvider);
     final newCfg = buildSavedConfig(
       serverText: _server.text,
       portText: _port.text,
@@ -59,7 +62,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       current: cfg,
     );
     try {
-      await rust.saveConfig(cfg: newCfg);
+      await ref.read(saveConfigFnProvider)(cfg: newCfg);
       if (mounted) {
         setState(() => _dirty = false);
         ScaffoldMessenger.maybeOf(context)?.showSnackBar(

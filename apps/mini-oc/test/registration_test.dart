@@ -7,6 +7,7 @@ import 'package:mini_oc/src/rust/api.dart' show ReportOutcome;
 import 'package:mini_oc/src/rust/config.dart' show ClientConfig;
 import 'package:mini_oc/stores.dart';
 
+
 /// 可注入上报结果的 RegistrationNotifier：记录 report() 调用。
 class _ScriptedRegistration extends RegistrationNotifier {
   _ScriptedRegistration({this.outcome});
@@ -20,6 +21,10 @@ class _ScriptedRegistration extends RegistrationNotifier {
   Future<void> report() async {
     calls++;
     state = outcome;
+    // 对齐真实 RegistrationNotifier：上报成功后刷新 config 缓存
+    if (outcome?.ok == true) {
+      ref.invalidate(rustCfgProvider);
+    }
   }
 }
 
@@ -51,6 +56,7 @@ Widget wrap({ReportOutcome? initial, required ClientConfig cfg}) {
       registrationProvider.overrideWith(() => _ScriptedRegistration(outcome: initial)),
       authProvider.overrideWith(() => _FixedAuth(const AuthState())),
       rustCfgProvider.overrideWithValue(cfg),
+      saveConfigFnProvider.overrideWithValue(({required cfg}) async {}),
     ],
     child: const MaterialApp(home: SettingsPage()),
   );
@@ -121,6 +127,63 @@ void main() {
     expect(saved.deviceId, 'd-123', reason: '保存后 deviceId 不丢');
     expect(saved.serverUrl, 'https://oc.example.com');
     expect(saved.theme, 'dark');
+  });
+
+  testWidgets('回归：上报后 config 已变（缓存未刷）→ 保存透传新 deviceId', (tester) async {
+    // 模拟场景：进设置页时 provider 缓存 deviceId=null 的旧快照 → 点「上报」
+    // （Rust 侧把新 deviceId="d-xyz" 写回 config.json）→ 改端口点「保存设置」。
+    // 保存必须读到重算后的新 config（deviceId="d-xyz"），而非旧快照。
+    final snapshots = <ClientConfig>[
+      const ClientConfig(serverUrl: 'https://oc.example.com', port: 9464, theme: 'system'),
+      const ClientConfig(
+          serverUrl: 'https://oc.example.com', port: 9464, theme: 'system', deviceId: 'd-xyz'),
+    ];
+    var readCount = 0;
+    var saveCount = 0;
+    final savedCfgs = <ClientConfig>[];
+
+    final reported = _ok('approved', true);
+    final container = ProviderContainer(overrides: [
+      // 可变 provider：首次读返回旧快照（deviceId=null），invalidate 后重算返回新值
+      rustCfgProvider.overrideWith((ref) {
+        final snap = snapshots[readCount.clamp(0, snapshots.length - 1)];
+        readCount++;
+        return snap;
+      }),
+      registrationProvider.overrideWith(() => _ScriptedRegistration(outcome: reported)),
+      authProvider.overrideWith(() => _FixedAuth(const AuthState())),
+      saveConfigFnProvider.overrideWithValue(({required cfg}) async {
+        saveCount++;
+        savedCfgs.add(cfg);
+      }),
+    ]);
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: container,
+      child: const MaterialApp(home: SettingsPage()),
+    ));
+    await tester.pumpAndSettle();
+
+    // 1) 点「上报」：mock fn 成功（state 置 approved）→ notifier invalidate 配置缓存
+    await tester.tap(find.text('上报'));
+    await tester.pumpAndSettle();
+    expect(saveCount, 0, reason: '上报本身不触发保存');
+
+    // 2) 改端口触发 _dirty，滚动到视口外的「保存设置」按钮并点击
+    await tester.enterText(find.byType(TextField).at(1), '9999');
+    await tester.pumpAndSettle();
+    await tester.dragUntilVisible(
+        find.text('保存设置'), find.byType(ListView), const Offset(0, -120));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('保存设置'));
+    await tester.pumpAndSettle();
+
+    // 3) 断言：保存走 saveConfigFnProvider 且透传的是新 deviceId
+    expect(saveCount, 1, reason: '保存调用注入的 saveConfig fn');
+    expect(savedCfgs.single.deviceId, 'd-xyz',
+        reason: '保存必须基于重算后的最新 config（新 deviceId），而非上报前的旧快照');
+    expect(savedCfgs.single.port, 9999, reason: '表单改动生效');
   });
 
   testWidgets('设置页不再暴露 opencode 二进制路径输入框，端口文案更新', (tester) async {
