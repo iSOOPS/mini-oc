@@ -138,10 +138,13 @@ async fn admin_users_list(
 #[derive(serde::Deserialize)]
 struct CreateUserBody {
     name: String,
-    #[serde(default)]
-    devices: Vec<serde_json::Value>,
 }
 
+/// 新增用户：只填用户名，密钥自动生成。
+///
+/// spec 决策 3：设备清单不再由管理员录入（`CreateUserBody.devices` 字段已删除，
+/// 同仓库同步发版不做兼容）——设备改由客户端上报、管理员审核转正产生，
+/// 新建用户 `devices` 恒为空数组。
 async fn admin_users_create(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -150,25 +153,6 @@ async fn admin_users_create(
     require_admin(&state, &headers)?;
     let mut file = state.sb.get_users().await?;
 
-    // 设备解析 + 校验
-    let mut devices = Vec::new();
-    for d in &body.devices {
-        let dev: UserDevice = serde_json::from_value(d.clone())
-            .map_err(|e| AppError::InvalidTarget(format!("设备字段错误: {e}")))?;
-        dev.validate().map_err(|e| AppError::InvalidTarget(e))?;
-        // 全局唯一（rathole service 名空间全局）
-        let dup = file
-            .users
-            .iter()
-            .any(|u| u.devices.iter().any(|x| x.name == dev.name));
-        if dup {
-            return Err(AppError::InvalidTarget(format!(
-                "设备名 {} 已被使用",
-                dev.name
-            )));
-        }
-        devices.push(dev);
-    }
     if file.users.iter().any(|u| u.name == body.name) {
         return Err(AppError::InvalidTarget("用户名已存在".into()));
     }
@@ -178,74 +162,127 @@ async fn admin_users_create(
         id: generate_user_id(&file.users.iter().map(|u| u.id.clone()).collect::<Vec<_>>()),
         name: body.name,
         key: generate_key(),
-        devices,
+        devices: vec![],
         pending_devices: vec![],
         created_at: now.clone(),
         updated_at: now,
         last_used_at: None,
     };
-    user.validate().map_err(|e| AppError::InvalidTarget(e))?;
+    user.validate().map_err(AppError::InvalidTarget)?;
     file.users.push(user.clone());
     state.sb.put_users(&file).await?;
     Ok(Json(serde_json::json!({"user": user})))
 }
 
+/// PUT /api/admin/users/:id 请求体中的单条设备更新指令（白名单）。
+///
+/// 仅 `deviceId`（定位键）+ `name`/`publicUrl`/`enabled`（可改字段）参与反序列化；
+/// `port`/`pctype`/`deviceName`/`bound`/`desc` 等事实字段出现即被 serde 静默忽略
+/// （归客户端上报维护，管理员不可经 PUT 改写）。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DeviceUpdateInput {
+    /// 设备定位键；为空时回退按 `name` 定位（存量 device_id 空的设备兼容）
+    #[serde(default)]
+    device_id: String,
+    /// rathole 服务名（新值；同时是 deviceId 为空时的回退定位键）
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    public_url: Option<String>,
+    #[serde(default)]
+    enabled: Option<bool>,
+}
+
+#[derive(serde::Deserialize)]
+struct UpdateUserBody {
+    /// 用户名（改名；spec 未删除的原有能力，唯一校验排除自身）
+    #[serde(default)]
+    name: Option<String>,
+    /// 设备白名单更新指令；PUT 请求体不含 pendingDevices——待审核设备走 approve/reject 独立端点
+    #[serde(default)]
+    devices: Vec<DeviceUpdateInput>,
+}
+
+/// 定位设备：优先按 device_id 精确匹配；device_id 为空的存量条目回退按 name 匹配。
+fn locate_device<'a>(devices: &'a [UserDevice], input: &'a DeviceUpdateInput) -> Option<usize> {
+    if !input.device_id.is_empty() {
+        return devices.iter().position(|d| d.device_id == input.device_id);
+    }
+    let name = input.name.as_deref()?;
+    devices.iter().position(|d| d.name == name)
+}
+
+/// 编辑用户：用户名改名 + 设备逐条白名单更新。
+///
+/// spec「变更：PUT /api/admin/users/:uid」：
+/// - 设备不再整体替换数组，改为按 `deviceId` 定位、仅改白名单字段
+///   （`name`/`publicUrl`/`enabled`）；定位失败 404「设备不存在」。
+/// - name 全局唯一校验保留（排除自身）。
+/// - 所有写操作刷 updated_at。
 async fn admin_users_update(
     State(state): State<SharedState>,
     headers: HeaderMap,
     Path(id): Path<String>,
-    Json(body): Json<serde_json::Value>,
+    Json(body): Json<UpdateUserBody>,
 ) -> AppResult<Json<serde_json::Value>> {
     require_admin(&state, &headers)?;
     let mut file = state.sb.get_users().await?;
-    if !file.users.iter().any(|u| u.id == id) {
-        return Err(AppError::NotFound(format!("用户 {id} 不存在")));
-    }
+    let user_idx = file
+        .users
+        .iter()
+        .position(|u| u.id == id)
+        .ok_or_else(|| AppError::NotFound(format!("用户 {id} 不存在")))?;
 
     // —— 校验阶段（不可变借用）——
-    let new_name = body["name"].as_str().map(|s| s.to_string());
-    if let Some(name) = &new_name {
+    // 用户名改名：全局唯一校验（排除自身）
+    if let Some(name) = &body.name {
         if file.users.iter().any(|u| u.id != id && &u.name == name) {
             return Err(AppError::InvalidTarget("用户名已被占用".into()));
         }
     }
-    let new_devices: Option<Vec<UserDevice>> = match body["devices"].as_array() {
-        Some(devs) => {
-            let mut parsed = Vec::new();
-            for d in devs {
-                let dev: UserDevice = serde_json::from_value(d.clone())
-                    .map_err(|e| AppError::InvalidTarget(format!("设备字段错误: {e}")))?;
-                dev.validate().map_err(|e| AppError::InvalidTarget(e))?;
-                let dup_other = file
-                    .users
+    // 设备逐条定位 + 服务名全局唯一（rathole service 名空间全局，排除自身其他设备）
+    for input in &body.devices {
+        let dev_idx = locate_device(&file.users[user_idx].devices, input)
+            .ok_or_else(|| AppError::NotFound("设备不存在".into()))?;
+        let orig = &file.users[user_idx].devices[dev_idx];
+        let new_name = input.name.clone().unwrap_or_else(|| orig.name.clone());
+        if new_name != orig.name
+            && file.users.iter().any(|u| {
+                u.devices
                     .iter()
-                    .filter(|u| u.id != id)
-                    .any(|u| u.devices.iter().any(|x| x.name == dev.name));
-                let dup_self = parsed.iter().any(|x: &UserDevice| x.name == dev.name);
-                if dup_other || dup_self {
-                    return Err(AppError::InvalidTarget(format!(
-                        "设备名 {} 已被使用",
-                        dev.name
-                    )));
-                }
-                parsed.push(dev);
-            }
-            Some(parsed)
+                    .any(|x| x.name == new_name && !(u.id == id && x.name == orig.name))
+            })
+        {
+            return Err(AppError::InvalidTarget(format!(
+                "设备名 {} 已被使用",
+                new_name
+            )));
         }
-        None => None,
-    };
+    }
 
-    // —— 写入阶段（可变借用）——
-    let slot = file.users.iter_mut().find(|u| u.id == id).unwrap();
-    if let Some(name) = new_name {
+    // —— 写入阶段（可变借用）：仅白名单字段赋值 ——
+    let slot = &mut file.users[user_idx];
+    if let Some(name) = body.name {
         slot.name = name;
     }
-    if let Some(devices) = new_devices {
-        slot.devices = devices;
+    for input in &body.devices {
+        let dev_idx = locate_device(&slot.devices, input)
+            .ok_or_else(|| AppError::NotFound("设备不存在".into()))?;
+        let dev = &mut slot.devices[dev_idx];
+        if let Some(name) = &input.name {
+            dev.name = name.clone();
+        }
+        if let Some(url) = &input.public_url {
+            dev.public_url = url.clone();
+        }
+        if let Some(enabled) = input.enabled {
+            dev.enabled = enabled;
+        }
     }
     slot.updated_at = Utc::now().to_rfc3339();
-    slot.validate().map_err(|e| AppError::InvalidTarget(e))?;
     let updated = slot.clone();
+    updated.validate().map_err(AppError::InvalidTarget)?;
     state.sb.put_users(&file).await?;
     Ok(Json(serde_json::json!({"user": updated})))
 }

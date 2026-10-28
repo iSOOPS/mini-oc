@@ -402,21 +402,16 @@ async fn delete_disabled_device_succeeds() {
     .await;
     let base = spawn_app(&sb).await;
 
-    // 现有 PUT 为整体替换数组：提交 enabled:false 完成停用
+    // 白名单 PUT：按 deviceId 定位，仅 enabled:false 停用（port 等事实字段不可经 PUT 修改）
     let cookie = admin_login(&base).await;
     let put = reqwest::Client::new()
         .put(format!("{base}/api/admin/users/{}", user.id))
         .header("cookie", &cookie)
         .json(&serde_json::json!({"devices": [{
-            "desc": "工作电脑",
-            "name": "macbook-pro",
-            "port": 9464,
-            "pctype": "macos",
-            "deviceName": "Samuels-MacBook",
             "deviceId": "3f2b8a44-1c5d-4e6f-9a8b-7c2d1e0f9a8b",
+            "name": "macbook-pro",
             "publicUrl": "https://oc.example.com",
             "enabled": false,
-            "bound": true,
         }]}))
         .send()
         .await
