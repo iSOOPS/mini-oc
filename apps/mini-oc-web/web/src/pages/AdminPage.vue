@@ -20,6 +20,9 @@ const expandedPending = ref<Record<string, boolean>>({})
 // 「同意」小表单状态（key：pendingDevice.deviceId）
 const approveForm = ref<Record<string, { open: boolean; name: string; publicUrl: string }>>({})
 
+// 停用/启用进行中的设备（key：用户id:设备id或名），防连点并发
+const toggling = ref<Record<string, boolean>>({})
+
 // 密钥一次性展示面板
 const keyPanel = ref<{ name: string; key: string } | null>(null)
 
@@ -79,15 +82,22 @@ function toggleEditDevice(d: AdminDevice) {
   d.enabled = !d.enabled
 }
 
+// 请求体同时带 deviceId 与 name：deviceId 非空时后端按 id 定位；
+// 为空时（存量未回填设备）后端回退按 name 定位，否则必 404
 async function toggleEnabled(uid: string, d: AdminDevice) {
+  const k = `${uid}:${d.deviceId || d.name}`
+  if (toggling.value[k]) return
+  toggling.value[k] = true
   error.value = ''
   try {
     await api.adminUpdateUser(uid, {
-      devices: [{ deviceId: d.deviceId, enabled: !d.enabled }],
+      devices: [{ deviceId: d.deviceId, name: d.name, enabled: !d.enabled }],
     })
     await load()
   } catch (e: any) {
     error.value = e?.message ?? '操作失败'
+  } finally {
+    toggling.value[k] = false
   }
 }
 
@@ -107,7 +117,10 @@ function togglePending(u: AdminUser) {
 }
 
 function openApproveForm(p: PendingDevice) {
-  approveForm.value[p.deviceId] = { open: true, name: '', publicUrl: '' }
+  const f = approveForm.value[p.deviceId]
+  // 已打开时不重置，避免再次点击清空已填内容
+  if (f?.open) return
+  approveForm.value[p.deviceId] = { open: true, name: f?.name ?? '', publicUrl: f?.publicUrl ?? '' }
 }
 
 function closeApproveForm(p: PendingDevice) {
@@ -247,7 +260,7 @@ function setApproveField(p: PendingDevice, field: 'name' | 'publicUrl', v: strin
             <span v-else-if="d.bound" class="badge bound">已绑定</span>
           </div>
           <div class="dactions">
-            <button class="btn ghost small" @click="toggleEnabled(u.id, d)">{{ d.enabled ? '停用' : '启用' }}</button>
+            <button class="btn ghost small" :disabled="toggling[`${u.id}:${d.deviceId || d.name}`]" @click="toggleEnabled(u.id, d)">{{ d.enabled ? '停用' : '启用' }}</button>
             <button v-if="!d.enabled" class="btn danger small" @click="removeDevice(u, d)">移除</button>
           </div>
         </div>
