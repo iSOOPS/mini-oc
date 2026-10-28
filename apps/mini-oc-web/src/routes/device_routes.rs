@@ -45,11 +45,14 @@ async fn user_info(
         return Err(AppError::Unauthorized("密钥错误".into()));
     };
     state.rate.reset(&ip).await;
+    // 停用设备不下发（视为不存在；admin 列表不过滤，管理员可见）
+    let devices: Vec<&mini_oc_core::device::UserDevice> =
+        user.devices.iter().filter(|d| d.enabled).collect();
     Ok(Json(serde_json::json!({
         "id": user.id,
         "name": user.name,
         "key": user.key,
-        "devices": user.devices,
+        "devices": devices,
     })))
 }
 
@@ -97,6 +100,7 @@ async fn device_bind(
         .iter()
         .find(|u| u.id == user_id)
         .and_then(|u| u.devices.iter().find(|d| d.name == body.name))
+        .filter(|d| d.enabled)
         .map(|d| d.pctype.clone())
     else {
         return Err(AppError::NotFound(format!("设备 {} 不存在", body.name)));
@@ -276,7 +280,12 @@ async fn device_status(
     Path(name): Path<String>,
 ) -> AppResult<impl axum::response::IntoResponse> {
     let user = current_user(&state, &headers).await?;
-    let Some(device) = user.devices.iter().find(|d| d.name == name) else {
+    let Some(device) = user
+        .devices
+        .iter()
+        .find(|d| d.name == name)
+        .filter(|d| d.enabled)
+    else {
         return Err(AppError::NotFound(format!("设备 {name} 不存在")));
     };
     let probe = probe_device(device, &user.key).await;
@@ -301,7 +310,13 @@ async fn find_device(
     mini_oc_core::device::UserDevice,
 )> {
     let user = current_user(state, headers).await?;
-    let Some(device) = user.devices.iter().find(|d| d.name == name).cloned() else {
+    let Some(device) = user
+        .devices
+        .iter()
+        .find(|d| d.name == name)
+        .filter(|d| d.enabled)
+        .cloned()
+    else {
         return Err(AppError::NotFound(format!("设备 {name} 不存在")));
     };
     Ok((user, device))

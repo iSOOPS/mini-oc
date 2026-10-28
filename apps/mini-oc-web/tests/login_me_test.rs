@@ -37,8 +37,17 @@ async fn login_ok_sets_cookie_and_me_returns_devices() {
 
     let resp = login(&base, &user.key).await;
     assert_eq!(resp.status(), 200);
-    let cookie = resp.headers().get("set-cookie").unwrap().to_str().unwrap().to_string();
-    assert!(cookie.starts_with("mini_oc_session="), "cookie 名: {cookie}");
+    let cookie = resp
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        cookie.starts_with("mini_oc_session="),
+        "cookie 名: {cookie}"
+    );
     assert!(cookie.contains("HttpOnly"));
     assert!(cookie.contains("SameSite=Lax"));
 
@@ -96,13 +105,17 @@ async fn me_device_401_maps_auth_mismatch() {
         .respond_with(ResponseTemplate::new(401))
         .mount(&device_server)
         .await;
-    mount_sb_users(&sb, &users_json(vec![PortalUser {
-        devices: vec![UserDevice {
-            public_url: device_server.uri(),
-            ..user.devices[0].clone()
-        }],
-        ..user
-    }])).await;
+    mount_sb_users(
+        &sb,
+        &users_json(vec![PortalUser {
+            devices: vec![UserDevice {
+                public_url: device_server.uri(),
+                ..user.devices[0].clone()
+            }],
+            ..user
+        }]),
+    )
+    .await;
     let base = spawn_app(&sb).await;
     let cookie = login(&base, &test_user().key)
         .await
@@ -157,4 +170,53 @@ async fn me_device_unreachable_maps_offline() {
     assert_eq!(me.status(), 200);
     let body: serde_json::Value = me.json().await.unwrap();
     assert_eq!(body["devices"][0]["status"], "offline");
+}
+
+#[tokio::test]
+async fn disabled_device_hidden_from_me_and_not_probed() {
+    let sb = MockServer::start().await;
+    // 设备在线：若实现遗漏过滤，会误探测该设备并下发——保证测试能抓住两类回归
+    let device_server = MockServer::start().await;
+    let probe_mock = Mock::given(method("GET"))
+        .and(path("/api/info"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "version": "2.0.32", "pid": 5, "urls": [], "paths": {"tmp": "/t"}
+        })))
+        .expect(0)
+        .mount_as_scoped(&device_server)
+        .await;
+    let mut user = test_user();
+    user.devices[0].enabled = false;
+    user.devices[0].public_url = device_server.uri();
+    mount_sb_users(&sb, &users_json(vec![user.clone()])).await;
+    let base = spawn_app(&sb).await;
+
+    let cookie = login(&base, &user.key)
+        .await
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let me = reqwest::Client::new()
+        .get(format!("{base}/api/me"))
+        .header("cookie", cookie)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(me.status(), 200);
+    let body: serde_json::Value = me.json().await.unwrap();
+    let devices = body["devices"].as_array().expect("devices 数组");
+    assert!(
+        devices.iter().all(|d| d["name"] != "macbook-pro"),
+        "停用设备不应出现在 /api/me 下发清单中"
+    );
+    assert!(devices.is_empty(), "仅有的设备已停用，清单应为空");
+    drop(probe_mock);
+    device_server.verify().await; // scoped mock 期望 0 次命中：停用设备未被探测
 }

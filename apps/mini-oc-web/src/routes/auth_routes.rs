@@ -75,7 +75,8 @@ fn is_https(headers: &HeaderMap) -> bool {
 
 fn build_session_cookie(subject: &str, key: &[u8], https: bool) -> AppResult<String> {
     let value = sign_cookie(subject, key, std::time::Duration::from_secs(USER_TTL_SECS))?;
-    let mut cookie = format!("{USER_COOKIE}={value}; Path=/; HttpOnly; SameSite=Lax; Max-Age={USER_TTL_SECS}");
+    let mut cookie =
+        format!("{USER_COOKIE}={value}; Path=/; HttpOnly; SameSite=Lax; Max-Age={USER_TTL_SECS}");
     if https {
         cookie.push_str("; Secure");
     }
@@ -110,7 +111,11 @@ async fn login(
     if let Some(slot) = users.iter_mut().find(|u| u.id == user.id) {
         *slot = updated;
     }
-    if let Err(e) = state.sb.put_users(&mini_oc_core::device::UsersFile { version: 2, users }).await {
+    if let Err(e) = state
+        .sb
+        .put_users(&mini_oc_core::device::UsersFile { version: 2, users })
+        .await
+    {
         tracing::warn!(%e, "last_used_at 写回失败（不阻塞登录）");
     }
 
@@ -140,10 +145,12 @@ async fn me(
     headers: HeaderMap,
 ) -> AppResult<impl axum::response::IntoResponse> {
     let user = current_user(&state, &headers).await?;
-    // 并发探测全部设备（永不抛错，慢设备 4s 超时兜底）
-    let probes = futures_probe_all(&user).await;
-    let devices: Vec<serde_json::Value> = user
-        .devices
+    // 停用设备不下发也不探测（先 filter 再 join_all）；admin 列表不过滤，管理员可见
+    let enabled: Vec<&mini_oc_core::device::UserDevice> =
+        user.devices.iter().filter(|d| d.enabled).collect();
+    // 并发探测全部启用设备（永不抛错，慢设备 4s 超时兜底）
+    let probes = futures_probe_all(&user, &enabled).await;
+    let devices: Vec<serde_json::Value> = enabled
         .iter()
         .zip(probes)
         .map(|(d, p)| {
@@ -162,13 +169,11 @@ async fn me(
     })))
 }
 
-async fn futures_probe_all(user: &PortalUser) -> Vec<crate::probe::DeviceProbe> {
-    futures::future::join_all(
-        user.devices
-            .iter()
-            .map(|d| probe_device(d, &user.key)),
-    )
-    .await
+async fn futures_probe_all(
+    user: &PortalUser,
+    devices: &[&mini_oc_core::device::UserDevice],
+) -> Vec<crate::probe::DeviceProbe> {
+    futures::future::join_all(devices.iter().map(|d| probe_device(d, &user.key))).await
 }
 
 async fn me_key(
@@ -197,7 +202,11 @@ async fn me_name(
 
     let mut file = state.sb.get_users().await?;
     // 重名检查（其他用户）
-    if file.users.iter().any(|u| u.id != user.id && u.name == user.name) {
+    if file
+        .users
+        .iter()
+        .any(|u| u.id != user.id && u.name == user.name)
+    {
         return Err(AppError::InvalidTarget("名称已被占用".into()));
     }
     if let Some(slot) = file.users.iter_mut().find(|u| u.id == user.id) {
