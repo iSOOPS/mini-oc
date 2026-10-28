@@ -117,7 +117,7 @@ export const api = {
   adminUsers: () => request<{ users: AdminUser[] }>('/api/admin/users'),
   adminCreateUser: (body: { name: string }) =>
     request<{ user: AdminUser }>('/api/admin/users', { method: 'POST', body: JSON.stringify(body) }),
-  adminUpdateUser: (id: string, body: { name?: string; devices?: { deviceId: string; name?: string; publicUrl?: string; enabled?: boolean }[] }) =>
+  adminUpdateUser: (id: string, body: { name?: string; devices?: { deviceId: string; matchName?: string; name?: string; publicUrl?: string; enabled?: boolean }[] }) =>
     request<{ user: AdminUser }>(`/api/admin/users/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   adminDeleteUser: (id: string) =>
     request<{ ok: boolean }>(`/api/admin/users/${id}`, { method: 'DELETE' }),

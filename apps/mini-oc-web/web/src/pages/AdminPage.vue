@@ -11,8 +11,10 @@ const showForm = ref(false)
 const editingId = ref<string | null>(null)
 const formName = ref('')
 
-// 编辑态下的设备编辑草稿（拷贝自用户数据，保存时按白名单字段提交）
-const editDevices = ref<AdminDevice[]>([])
+// 编辑态下的设备编辑草稿（拷贝自用户数据，保存时按白名单字段提交）。
+// matchName 记录打开编辑时的原始服务名：deviceId 为空的存量设备改名后，
+// 后端仍能按原名定位（name 已是新值，不能兼任定位键）。
+const editDevices = ref<(AdminDevice & { matchName: string })[]>([])
 
 // 待审核折叠区展开状态（key：用户 id）
 const expandedPending = ref<Record<string, boolean>>({})
@@ -49,7 +51,7 @@ function openCreate() {
 function openEdit(u: AdminUser) {
   editingId.value = u.id
   formName.value = u.name
-  editDevices.value = u.devices.map((d) => ({ ...d }))
+  editDevices.value = u.devices.map((d) => ({ ...d, matchName: d.name }))
   showForm.value = true
 }
 
@@ -61,6 +63,7 @@ async function saveForm() {
         name: formName.value,
         devices: editDevices.value.map((d) => ({
           deviceId: d.deviceId,
+          matchName: d.matchName,
           name: d.name,
           publicUrl: d.publicUrl,
           enabled: d.enabled,

@@ -435,6 +435,54 @@ async fn put_duplicate_name_still_rejected() {
     assert_eq!(err["error"]["code"], "invalid_target");
 }
 
+/// Fix Round 2：deviceId 为空的存量设备改名——定位用原 name 经 `matchName` 携带。
+///
+/// 原缺陷：name 兼任「定位键」与「待改字段」，改名时按新名定位 → 404「设备不存在」。
+#[tokio::test]
+async fn put_rename_with_empty_device_id_via_match_name() {
+    let sb = MockServer::start().await;
+    let mut user = test_user();
+    user.devices[0].device_id = String::new();
+    user.devices[0].name = "old-name".into();
+    mount_stateful_sb(
+        &sb,
+        UsersFile {
+            version: 2,
+            users: vec![user.clone()],
+        },
+    )
+    .await;
+    let base = spawn_app(&sb).await;
+    let cookie = admin_login(&base).await;
+
+    let resp = reqwest::Client::new()
+        .put(format!("{base}/api/admin/users/{}", user.id))
+        .header("cookie", &cookie)
+        .json(&serde_json::json!({"devices": [{
+            "deviceId": "",
+            "matchName": "old-name",
+            "name": "new-name",
+            "publicUrl": "https://t.example.com",
+        }]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200, "matchName 定位改名 → 200（原实现 404）");
+
+    let users = admin_users(&base).await;
+    let dev = &users["users"][0]["devices"][0];
+    assert_eq!(dev["name"], "new-name", "落盘后服务名应为新值");
+    assert_eq!(
+        dev["publicUrl"], "https://t.example.com",
+        "其余白名单字段一并更新"
+    );
+    assert_eq!(
+        dev["matchName"],
+        serde_json::Value::Null,
+        "matchName 仅用于定位，不得写入设备"
+    );
+}
+
 /// body 只填 name → 200，key 自动生成，devices 恒为空数组。
 #[tokio::test]
 async fn create_user_without_devices() {

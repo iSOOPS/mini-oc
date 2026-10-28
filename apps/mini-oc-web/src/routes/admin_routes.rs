@@ -182,10 +182,15 @@ async fn admin_users_create(
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct DeviceUpdateInput {
-    /// 设备定位键；为空时回退按 `name` 定位（存量 device_id 空的设备兼容）
+    /// 设备定位键；为空时回退按 `matchName` 定位，再无则回退按 `name` 定位
+    /// （存量 device_id 空的设备兼容）
     #[serde(default)]
     device_id: String,
-    /// rathole 服务名（新值；同时是 deviceId 为空时的回退定位键）
+    /// 仅用于定位的原始服务名（deviceId 为空时的优先定位键；不写入设备）。
+    /// 改名场景下 `name` 已是要改写成的新值，不能再兼任定位键。
+    #[serde(default)]
+    match_name: Option<String>,
+    /// rathole 服务名（新值；deviceId 与 matchName 皆空时的回退定位键）
     #[serde(default)]
     name: Option<String>,
     #[serde(default)]
@@ -204,13 +209,21 @@ struct UpdateUserBody {
     devices: Vec<DeviceUpdateInput>,
 }
 
-/// 定位设备：优先按 device_id 精确匹配；device_id 为空的存量条目回退按 name 匹配。
+/// 定位设备：优先按 device_id 精确匹配；device_id 为空的存量条目优先按 matchName
+/// （定位用原 name）匹配，无 matchName 时回退按 name 匹配（旧调用方语义不变）。
 fn locate_device<'a>(devices: &'a [UserDevice], input: &'a DeviceUpdateInput) -> Option<usize> {
     if !input.device_id.is_empty() {
         return devices.iter().position(|d| d.device_id == input.device_id);
     }
-    let name = input.name.as_deref()?;
-    devices.iter().position(|d| d.name == name)
+    if let Some(match_name) = input
+        .match_name
+        .as_deref()
+        .filter(|m| !m.is_empty())
+        .or(input.name.as_deref())
+    {
+        return devices.iter().position(|d| d.name == match_name);
+    }
+    None
 }
 
 /// 编辑用户：用户名改名 + 设备逐条白名单更新。
