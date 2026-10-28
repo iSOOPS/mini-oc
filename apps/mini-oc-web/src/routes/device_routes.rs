@@ -191,7 +191,11 @@ async fn device_register(
             dev.port = body.port;
             dev.pctype = body.pctype.clone();
             dev.device_name = body.device_name.clone();
-            dev.desc = body.desc.clone();
+            // UserDevice::validate 要求 desc 非空：空串表示「本次未上报」，保留原值
+            // （存量设备 desc 已过校验必然非空），否则 admin PUT 编辑该用户会被 400 锁死
+            if !body.desc.is_empty() {
+                dev.desc = body.desc.clone();
+            }
             user_slot.updated_at = Utc::now().to_rfc3339();
             let enabled = dev.enabled;
             state.sb.put_users(&file).await?;
@@ -217,7 +221,10 @@ async fn device_register(
         dev.port = body.port;
         dev.pctype = body.pctype.clone();
         dev.device_name = body.device_name.clone();
-        dev.desc = body.desc.clone();
+        // 同分支①：空 desc 保留原值，防 admin PUT 被 UserDevice::validate 400 锁死
+        if !body.desc.is_empty() {
+            dev.desc = body.desc.clone();
+        }
         user_slot.updated_at = Utc::now().to_rfc3339();
         let (device_id, enabled) = (dev.device_id.clone(), dev.enabled);
         state.sb.put_users(&file).await?;

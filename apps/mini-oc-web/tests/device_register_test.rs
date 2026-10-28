@@ -331,6 +331,67 @@ async fn register_pending_is_idempotent() {
     assert_eq!(pending[0]["desc"], "第二次上报");
 }
 
+/// 空 desc 上报不得清空存量 desc。
+///
+/// `UserDevice::validate` 要求 desc 1-64 非空：客户端省略 desc 上报已 approved
+/// 设备时若以空串覆盖，后续 admin PUT 编辑该用户会永远 400（desc 在 admin
+/// 侧不可修复）。desc 归客户端，但空串仅表示「本次未上报」，不是删除。
+#[tokio::test]
+async fn register_empty_desc_keeps_existing_desc() {
+    let sb = MockServer::start().await;
+    let mut user = test_user();
+    user.devices[0].desc = "工作机".into();
+    user.devices[0].device_id = "3f2b8a44-1c5d-4e6f-9a8b-7c2d1e0f9a8b".into();
+    mount_stateful_sb(
+        &sb,
+        UsersFile {
+            version: 2,
+            users: vec![user.clone()],
+        },
+    )
+    .await;
+    let base = spawn_app(&sb).await;
+
+    // 分支①：deviceId 命中 devices，客户端省略 desc（serde default → 空串）
+    let resp = register(
+        &base,
+        &reg_body(
+            &user.key,
+            "3f2b8a44-1c5d-4e6f-9a8b-7c2d1e0f9a8b",
+            "",
+            9999,
+            "macos",
+            "Renamed-MacBook",
+            "macos",
+        ),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["status"], "approved");
+
+    let users = admin_users(&base).await;
+    let dev = &users["users"][0]["devices"][0];
+    assert_eq!(dev["desc"], "工作机", "空 desc 不得清空存量 desc");
+    assert_eq!(dev["port"], 9999, "其余事实字段照常更新");
+    assert_eq!(dev["deviceName"], "Renamed-MacBook");
+
+    // 分支②：deviceId 空 + name+pctype 命中存量回填，同样保留 desc
+    let resp = register(
+        &base,
+        &reg_body(&user.key, "", "", 9555, "macos", "Renamed-MacBook", "macos"),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["status"], "approved", "存量回填应 approved");
+
+    let users = admin_users(&base).await;
+    let dev = &users["users"][0]["devices"][0];
+    assert_eq!(dev["desc"], "工作机", "分支②同样不得清空 desc");
+    assert_eq!(dev["port"], 9555);
+}
+
 /// ⑤ os 与 pctype 不一致 → 400（同 device-bind 的平台一致性校验）。
 #[tokio::test]
 async fn register_rejects_os_mismatch() {
