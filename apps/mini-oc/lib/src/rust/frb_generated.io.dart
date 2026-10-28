@@ -5,6 +5,7 @@
 
 import 'account.dart';
 import 'api.dart';
+import 'api/appenv.dart';
 import 'api/simple.dart';
 import 'config.dart';
 
@@ -45,7 +46,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   AccountInfo dco_decode_account_info(dynamic raw);
 
   @protected
+  AppEnv dco_decode_app_env(dynamic raw);
+
+  @protected
   bool dco_decode_bool(dynamic raw);
+
+  @protected
+  AppEnv dco_decode_box_autoadd_app_env(dynamic raw);
 
   @protected
   ClientConfig dco_decode_box_autoadd_client_config(dynamic raw);
@@ -102,6 +109,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ProjectSummary dco_decode_project_summary(dynamic raw);
 
   @protected
+  ReportOutcome dco_decode_report_outcome(dynamic raw);
+
+  @protected
   ServiceMode dco_decode_service_mode(dynamic raw);
 
   @protected
@@ -145,7 +155,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   AccountInfo sse_decode_account_info(SseDeserializer deserializer);
 
   @protected
+  AppEnv sse_decode_app_env(SseDeserializer deserializer);
+
+  @protected
   bool sse_decode_bool(SseDeserializer deserializer);
+
+  @protected
+  AppEnv sse_decode_box_autoadd_app_env(SseDeserializer deserializer);
 
   @protected
   ClientConfig sse_decode_box_autoadd_client_config(
@@ -210,6 +226,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ProjectSummary sse_decode_project_summary(SseDeserializer deserializer);
 
   @protected
+  ReportOutcome sse_decode_report_outcome(SseDeserializer deserializer);
+
+  @protected
   ServiceMode sse_decode_service_mode(SseDeserializer deserializer);
 
   @protected
@@ -258,7 +277,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_account_info(AccountInfo self, SseSerializer serializer);
 
   @protected
+  void sse_encode_app_env(AppEnv self, SseSerializer serializer);
+
+  @protected
   void sse_encode_bool(bool self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_app_env(AppEnv self, SseSerializer serializer);
 
   @protected
   void sse_encode_box_autoadd_client_config(
@@ -343,6 +368,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     ProjectSummary self,
     SseSerializer serializer,
   );
+
+  @protected
+  void sse_encode_report_outcome(ReportOutcome self, SseSerializer serializer);
 
   @protected
   void sse_encode_service_mode(ServiceMode self, SseSerializer serializer);

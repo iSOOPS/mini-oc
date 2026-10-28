@@ -4,6 +4,7 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import 'account.dart';
+import 'api/appenv.dart';
 import 'config.dart';
 import 'frb_generated.dart';
 import 'logbuf.dart';
@@ -12,8 +13,8 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 import 'supervisor.dart';
 
-// These functions are ignored because they are not marked as `pub`: `bound_device_brief`, `current_key`, `effective_port`, `global_supervisor`, `rathole_settings_dir`, `real_probe`, `real_rathole_command`, `real_serve_command`, `require_serve`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `fmt`, `fmt`
+// These functions are ignored because they are not marked as `pub`: `bound_device_brief`, `current_key`, `effective_port`, `global_supervisor`, `rathole_settings_dir`, `real_probe`, `real_rathole_command`, `real_serve_command`, `report_port`, `require_serve`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`
 
 /// 登录（见 account::login）。
 Future<AccountInfo> login({required String serverUrl, required String key}) =>
@@ -33,6 +34,17 @@ Future<void> bindDevice({
 /// 登出（见 account::logout）。
 Future<void> logout() => RustLib.instance.api.crateApiLogout();
 
+/// 读应用 env 配置（地址 / 记住密码 / 密码；同步：本地文件操作）。
+AppEnv loadAppEnv() => RustLib.instance.api.crateApiLoadAppEnv();
+
+/// 写应用 env 配置（记住密码逻辑；docker 注入时不落文件）。
+Future<void> saveAppEnv({required AppEnv cfg}) =>
+    RustLib.instance.api.crateApiSaveAppEnv(cfg: cfg);
+
+/// 生效服务器地址：env → config.json 兜底 → 默认 https://oc.isoops.com。
+String serverUrlEffective() =>
+    RustLib.instance.api.crateApiServerUrlEffective();
+
 /// 读本地配置（同步：本地文件操作）。
 ClientConfig loadConfig() => RustLib.instance.api.crateApiLoadConfig();
 
@@ -46,6 +58,14 @@ String ping() => RustLib.instance.api.crateApiPing();
 /// opencode 二进制定位：OPENCODE_BIN env → config.opencode_bin → PATH。
 Future<String> resolveOpencodeBin() =>
     RustLib.instance.api.crateApiResolveOpencodeBin();
+
+/// 上报本机设备信息到 /api/device-register（幂等，重复调用无害）。
+///
+/// - 地址取 `server_url_effective()`（env 优先，比读 config 更稳）
+/// - 响应 deviceId 与 config 不同 → 原子写回 config.json
+/// - 永不 panic：所有错误装进 `ReportOutcome.error`，调用方静默降级
+Future<ReportOutcome> reportRegistration() =>
+    RustLib.instance.api.crateApiReportRegistration();
 
 /// 启动本地服务。
 Future<void> startLocal() => RustLib.instance.api.crateApiStartLocal();
@@ -126,6 +146,46 @@ class ProjectSummary {
           name == other.name &&
           path == other.path &&
           vcs == other.vcs;
+}
+
+/// 上报结果（永不 panic：失败时 ok=false，错误装进 error 字段）。
+class ReportOutcome {
+  final bool ok;
+
+  /// approved | pending；失败为空串
+  final String status;
+
+  /// 服务端确认的设备 ID；失败为空串
+  final String deviceId;
+  final bool enabled;
+  final String? error;
+
+  const ReportOutcome({
+    required this.ok,
+    required this.status,
+    required this.deviceId,
+    required this.enabled,
+    this.error,
+  });
+
+  @override
+  int get hashCode =>
+      ok.hashCode ^
+      status.hashCode ^
+      deviceId.hashCode ^
+      enabled.hashCode ^
+      error.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ReportOutcome &&
+          runtimeType == other.runtimeType &&
+          ok == other.ok &&
+          status == other.status &&
+          deviceId == other.deviceId &&
+          enabled == other.enabled &&
+          error == other.error;
 }
 
 /// 会话摘要（frb）。

@@ -7,6 +7,7 @@ import 'package:mini_oc/pages/home_page.dart';
 import 'package:mini_oc/pages/login_page.dart';
 import 'package:mini_oc/stores.dart';
 import 'package:mini_oc/src/rust/account.dart' show AccountInfo, DeviceBrief;
+import 'package:mini_oc/src/rust/api/appenv.dart' show AppEnv;
 import 'package:mini_oc/src/rust/config.dart' show ClientConfig;
 import 'package:mini_oc/src/rust/supervisor.dart' show ServiceMode, ServiceState;
 
@@ -20,7 +21,7 @@ class _ScriptedAuth extends AuthNotifier {
   AuthState build() => const AuthState();
 
   @override
-  Future<AccountInfo> login(String serverUrl, String key) async {
+  Future<AccountInfo> login(String serverUrl, String key, {bool remember = false}) async {
     state = AuthState(userId: info.id, userName: info.name);
     return info;
   }
@@ -65,6 +66,10 @@ Widget app(_ScriptedAuth auth) {
       rustCfgProvider.overrideWithValue(
         const ClientConfig(serverUrl: 'https://oc.example.com', port: 9464, theme: 'system'),
       ),
+      appEnvProvider.overrideWithValue(
+        const AppEnv(serverUrl: 'https://oc.example.com', rememberPassword: false, password: ''),
+      ),
+      serverUrlEffectiveProvider.overrideWithValue('https://oc.example.com'),
     ],
     child: MaterialApp.router(routerConfig: router),
   );

@@ -5,7 +5,28 @@ import '../stores.dart';
 import '../src/rust/api.dart' as rust;
 import '../src/rust/config.dart' show ClientConfig;
 
-/// 设置页：服务器地址、opencode 路径、端口偏好、主题、关于。
+/// 由表单值 + 当前配置构造新 ClientConfig（保存与测试共用，保证字段透传一致）。
+///
+/// ⚠️ 设备身份透传：deviceId / user / boundDevice 必须从 [current] 原样带入，
+/// 否则点一次「保存」就丢设备身份（builder check 高危项）。
+ClientConfig buildSavedConfig({
+  required String serverText,
+  required String portText,
+  required String theme,
+  required ClientConfig current,
+}) {
+  return ClientConfig(
+    serverUrl: serverText.trim(),
+    user: current.user,
+    boundDevice: current.boundDevice,
+    port: int.tryParse(portText.trim()) ?? current.port,
+    opencodeBin: current.opencodeBin,
+    deviceId: current.deviceId,
+    theme: theme,
+  );
+}
+
+/// 设置页：服务器地址、端口偏好、设备上报、主题、关于。
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
 
@@ -14,30 +35,28 @@ class SettingsPage extends ConsumerStatefulWidget {
 }
 
 class _SettingsPageState extends ConsumerState<SettingsPage> {
-  late final _server = TextEditingController(text: rust.loadConfig().serverUrl);
-  late final _bin = TextEditingController(text: rust.loadConfig().opencodeBin ?? '');
+  // 经 rustCfgProvider 读初始值（测试可注入；生产等价 rust.loadConfig()）
+  late final _server =
+      TextEditingController(text: ref.read(rustCfgProvider).serverUrl);
   late final _port =
-      TextEditingController(text: rust.loadConfig().port.toString());
+      TextEditingController(text: ref.read(rustCfgProvider).port.toString());
   String _theme = 'system';
   bool _dirty = false;
 
   @override
   void dispose() {
     _server.dispose();
-    _bin.dispose();
     _port.dispose();
     super.dispose();
   }
 
   Future<void> _save() async {
-    final cfg = rust.loadConfig();
-    final newCfg = ClientConfig(
-      serverUrl: _server.text.trim(),
-      user: cfg.user,
-      boundDevice: cfg.boundDevice,
-      port: int.tryParse(_port.text.trim()) ?? cfg.port,
-      opencodeBin: _bin.text.trim().isEmpty ? null : _bin.text.trim(),
+    final cfg = ref.read(rustCfgProvider);
+    final newCfg = buildSavedConfig(
+      serverText: _server.text,
+      portText: _port.text,
       theme: _theme,
+      current: cfg,
     );
     try {
       await rust.saveConfig(cfg: newCfg);
@@ -53,6 +72,56 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     }
   }
 
+  /// 设备上报区：状态文本 + 独立「上报」按钮（状态机见 spec「上报时机」节）。
+  Widget _buildReportSection() {
+    final outcome = ref.watch(registrationProvider);
+    final scheme = Theme.of(context).colorScheme;
+
+    // 状态推导：(按钮可点, 状态文案, 文案颜色)
+    String statusText;
+    var enabled = true;
+    var statusColor = scheme.onSurfaceVariant;
+    if (outcome == null) {
+      statusText = '尚未上报：点击「上报」把本机信息登记给服务器';
+    } else if (outcome.ok != true) {
+      statusText = '上报失败：${outcome.error ?? '未知错误'}';
+      statusColor = scheme.error;
+    } else if (outcome.status == 'pending') {
+      // 定夺：不做轮询，重进设置页不重查；上报幂等，审核被拒可重报
+      statusText = '待审核';
+      enabled = false;
+    } else if (outcome.status == 'approved' && outcome.enabled) {
+      statusText = '已上报';
+      enabled = false;
+    } else if (outcome.status == 'approved' && !outcome.enabled) {
+      statusText = '已停用';
+      statusColor = scheme.error;
+    } else {
+      statusText = '状态未知（${outcome.status}），可重新上报';
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(statusText,
+                style: TextStyle(fontSize: 13, color: statusColor)),
+          ),
+          const SizedBox(width: 12),
+          FilledButton.tonal(
+            onPressed: enabled
+                ? () async {
+                    await ref.read(registrationProvider.notifier).report();
+                  }
+                : null,
+            child: const Text('上报'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -66,9 +135,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 hint: 'https://oc.example.com'),
           ]),
           _section(context, '本地', [
-            _field('opencode 二进制路径（留空自动探测）', _bin, hint: 'opencode'),
-            _field('本地端口偏好（绑定设备后以清单为准）', _port, hint: '9464'),
+            _field('opencode 端口（上报给服务端）', _port, hint: '9464'),
           ]),
+          _section(context, '设备上报', [_buildReportSection()]),
           _section(context, '外观', [
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),

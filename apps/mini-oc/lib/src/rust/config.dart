@@ -19,6 +19,9 @@ class ClientConfig {
   /// opencode 二进制路径覆盖
   final String? opencodeBin;
 
+  /// 设备唯一 ID（服务端 /api/device-register 下发的 UUID；首次上报前为 None）
+  final String? deviceId;
+
   /// system | light | dark
   final String theme;
 
@@ -28,6 +31,7 @@ class ClientConfig {
     this.boundDevice,
     required this.port,
     this.opencodeBin,
+    this.deviceId,
     required this.theme,
   });
 
@@ -38,6 +42,7 @@ class ClientConfig {
       boundDevice.hashCode ^
       port.hashCode ^
       opencodeBin.hashCode ^
+      deviceId.hashCode ^
       theme.hashCode;
 
   @override
@@ -50,6 +55,7 @@ class ClientConfig {
           boundDevice == other.boundDevice &&
           port == other.port &&
           opencodeBin == other.opencodeBin &&
+          deviceId == other.deviceId &&
           theme == other.theme;
 }
 
