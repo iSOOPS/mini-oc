@@ -1,9 +1,9 @@
 //! 设备信息下发 / 绑定 / 深探测（Task 7）。
 //! 项目/会话列表与跳转在 Task 8/9 填充。
 
-use crate::routes::auth_routes::{current_user, extract_ip};
 use crate::error::{AppError, AppResult};
 use crate::probe::probe_device;
+use crate::routes::auth_routes::{current_user, extract_ip};
 use crate::routes::SharedState;
 use crate::snapshot::dual_source;
 use axum::extract::{Path, Query, State};
@@ -20,6 +20,7 @@ pub fn router() -> Router<SharedState> {
     Router::new()
         .route("/api/user/info", post(user_info))
         .route("/api/device-bind", post(device_bind))
+        .route("/api/device-register", post(device_register))
         .route("/api/device-status/:name", get(device_status))
         .route("/api/devices/:name/projects", get(projects))
         .route("/api/devices/:name/sessions", get(sessions))
@@ -78,7 +79,12 @@ async fn device_bind(
     let ip = extract_ip(&headers);
     state.rate.check(&ip).await?;
     let mut file = state.sb.get_users().await?;
-    let Some(user_id) = file.users.iter().find(|u| u.key == body.key).map(|u| u.id.clone()) else {
+    let Some(user_id) = file
+        .users
+        .iter()
+        .find(|u| u.key == body.key)
+        .map(|u| u.id.clone())
+    else {
         state.rate.record_failure(&ip).await;
         return Err(AppError::Unauthorized("密钥错误".into()));
     };
@@ -106,11 +112,154 @@ async fn device_bind(
     let now = Utc::now().to_rfc3339();
     let user_slot = file.users.iter_mut().find(|u| u.id == user_id).unwrap();
     user_slot.updated_at = now.clone();
-    let dev_slot = user_slot.devices.iter_mut().find(|d| d.name == body.name).unwrap();
+    let dev_slot = user_slot
+        .devices
+        .iter_mut()
+        .find(|d| d.name == body.name)
+        .unwrap();
     dev_slot.bound = body.bound;
     dev_slot.device_name = body.device_name;
     state.sb.put_users(&file).await?;
     Ok(Json(serde_json::json!({"ok": true})))
+}
+
+#[derive(serde::Deserialize)]
+struct RegisterBody {
+    key: String,
+    /// 客户端持久化的设备 ID；首次上报为空
+    #[serde(rename = "deviceId", default)]
+    device_id: String,
+    /// 客户端上报的描述（desc 归客户端，可空串）
+    #[serde(default)]
+    desc: String,
+    port: u16,
+    pctype: String,
+    #[serde(rename = "deviceName")]
+    device_name: String,
+    /// 客户端真实平台（与 pctype 一致性校验）
+    #[serde(default)]
+    os: String,
+}
+
+/// 设备上报注册：按 spec 四态匹配做幂等处理。
+///
+/// 匹配顺序（spec 定夺版，否则存量设备会困在 pending）：
+/// ① deviceId 非空 → 按 device_id 匹配 devices（命中 → 幂等更新事实字段，enabled 不变）
+/// ② deviceId 空/未命中 → 按 device_name+pctype 匹配 devices（存量回填，approved）
+/// ③ 按 device_name+pctype 匹配 pending_devices（更新 desc/port/reported_at，复用 deviceId）
+/// ④ 生成新 PendingDevice 入 pending_devices（pending 态 enabled 恒 false）
+async fn device_register(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Json(body): Json<RegisterBody>,
+) -> AppResult<impl axum::response::IntoResponse> {
+    use mini_oc_core::device::{generate_device_id, PendingDevice};
+
+    let ip = extract_ip(&headers);
+    state.rate.check(&ip).await?;
+    let mut file = state.sb.get_users().await?;
+    let Some(user_slot) = file.users.iter_mut().find(|u| u.key == body.key) else {
+        state.rate.record_failure(&ip).await;
+        return Err(AppError::Unauthorized("密钥错误".into()));
+    };
+    state.rate.reset(&ip).await;
+
+    // 平台一致性校验（同 device-bind：客户端上报 os 必须与上报 pctype 一致）
+    if !body.os.is_empty() && !body.pctype.is_empty() && body.os != body.pctype {
+        return Err(AppError::InvalidTarget(format!(
+            "平台不匹配：pctype 为 {}，客户端上报 os 为 {}",
+            body.pctype, body.os
+        )));
+    }
+    let pending = PendingDevice {
+        device_id: String::new(), // 由下方匹配流程填充
+        desc: body.desc.clone(),
+        port: body.port,
+        pctype: body.pctype.clone(),
+        device_name: body.device_name.clone(),
+        reported_at: Utc::now().to_rfc3339(),
+    };
+    pending.validate().map_err(AppError::InvalidTarget)?;
+
+    // —— ① deviceId 非空：按 device_id 匹配 devices，命中 → 幂等更新事实字段 ——
+    if !body.device_id.is_empty() {
+        if let Some(dev) = user_slot
+            .devices
+            .iter_mut()
+            .find(|d| d.device_id == body.device_id)
+        {
+            dev.port = body.port;
+            dev.pctype = body.pctype.clone();
+            dev.device_name = body.device_name.clone();
+            dev.desc = body.desc.clone();
+            user_slot.updated_at = Utc::now().to_rfc3339();
+            let enabled = dev.enabled;
+            state.sb.put_users(&file).await?;
+            return Ok(Json(serde_json::json!({
+                "status": "approved",
+                "deviceId": body.device_id,
+                "enabled": enabled,
+            })));
+        }
+    }
+
+    // —— ② 存量回填：device_name+pctype 命中 devices → 回填 device_id，approved ——
+    if let Some(dev) = user_slot
+        .devices
+        .iter_mut()
+        .find(|d| d.device_name == body.device_name && d.pctype == body.pctype)
+    {
+        dev.device_id = if body.device_id.is_empty() {
+            generate_device_id()
+        } else {
+            body.device_id.clone()
+        };
+        dev.port = body.port;
+        dev.pctype = body.pctype.clone();
+        dev.device_name = body.device_name.clone();
+        dev.desc = body.desc.clone();
+        user_slot.updated_at = Utc::now().to_rfc3339();
+        let (device_id, enabled) = (dev.device_id.clone(), dev.enabled);
+        state.sb.put_users(&file).await?;
+        return Ok(Json(serde_json::json!({
+            "status": "approved",
+            "deviceId": device_id,
+            "enabled": enabled,
+        })));
+    }
+
+    // —— ③ pending 匹配：device_name+pctype 命中 pending_devices → 更新记录，复用 deviceId ——
+    if let Some(p) = user_slot
+        .pending_devices
+        .iter_mut()
+        .find(|p| p.device_name == body.device_name && p.pctype == body.pctype)
+    {
+        p.desc = body.desc.clone();
+        p.port = body.port;
+        p.reported_at = Utc::now().to_rfc3339();
+        user_slot.updated_at = Utc::now().to_rfc3339();
+        let device_id = p.device_id.clone();
+        state.sb.put_users(&file).await?;
+        return Ok(Json(serde_json::json!({
+            "status": "pending",
+            "deviceId": device_id,
+            "enabled": false,
+        })));
+    }
+
+    // —— ④ 全新设备：生成 deviceId 追加 pending ——
+    let device_id = generate_device_id();
+    user_slot.pending_devices.push(PendingDevice {
+        device_id: device_id.clone(),
+        ..pending
+    });
+    user_slot.updated_at = Utc::now().to_rfc3339();
+    state.sb.put_users(&file).await?;
+    Ok(Json(serde_json::json!({
+        "status": "pending",
+        "deviceId": device_id,
+        "enabled": false,
+    })))
 }
 
 /// 单设备深探测（按名，cookie 会话）。
@@ -140,7 +289,10 @@ async fn find_device(
     state: &SharedState,
     headers: &HeaderMap,
     name: &str,
-) -> AppResult<(mini_oc_core::device::PortalUser, mini_oc_core::device::UserDevice)> {
+) -> AppResult<(
+    mini_oc_core::device::PortalUser,
+    mini_oc_core::device::UserDevice,
+)> {
     let user = current_user(state, headers).await?;
     let Some(device) = user.devices.iter().find(|d| d.name == name).cloned() else {
         return Err(AppError::NotFound(format!("设备 {name} 不存在")));
@@ -149,7 +301,10 @@ async fn find_device(
 }
 
 /// 构造设备的 OcClient（basic opencode:<user.key>）。
-fn device_client(user: &mini_oc_core::device::PortalUser, device: &mini_oc_core::device::UserDevice) -> AppResult<OcClient> {
+fn device_client(
+    user: &mini_oc_core::device::PortalUser,
+    device: &mini_oc_core::device::UserDevice,
+) -> AppResult<OcClient> {
     let base = tunnel_base_url(&device.public_url, device.port)
         .map_err(|e| AppError::InvalidTarget(e.to_string()))?;
     Ok(OcClient::new(&base, &user.key))
@@ -196,7 +351,12 @@ async fn sessions(
 ) -> AppResult<Json<serde_json::Value>> {
     let (user, device) = find_device(&state, &headers, &name).await?;
     let directory = params.get("directory").cloned();
-    let cache_key = format!("{}:{}:sessions:{}", user.id, name, directory.clone().unwrap_or_default());
+    let cache_key = format!(
+        "{}:{}:sessions:{}",
+        user.id,
+        name,
+        directory.clone().unwrap_or_default()
+    );
     if let Some(cached) = state.live_cache.get(&cache_key).await {
         return Ok(Json(cached));
     }
@@ -248,11 +408,7 @@ async fn jump(
         let body = serde_json::json!({"url": url, "expiresIn": 300});
         Ok((StatusCode::OK, Json(body)).into_response())
     } else {
-        Ok((
-            StatusCode::FOUND,
-            [(axum::http::header::LOCATION, url)],
-        )
-            .into_response())
+        Ok((StatusCode::FOUND, [(axum::http::header::LOCATION, url)]).into_response())
     }
 }
 
