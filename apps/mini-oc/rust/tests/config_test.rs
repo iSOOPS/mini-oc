@@ -14,6 +14,7 @@ fn sample() -> ClientConfig {
         port: 9464,
         opencode_bin: None,
         theme: "system".into(),
+        device_id: None,
     }
 }
 
@@ -63,4 +64,34 @@ fn config_file_created_with_owner_only_permission() {
         let mode = std::fs::metadata(&path).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600, "凭据文件权限必须 0600");
     }
+}
+
+#[test]
+fn config_legacy_json_without_device_id_reads_as_none() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.json");
+    // 老配置 JSON 无 device_id 字段（serde default 兼容）
+    std::fs::write(
+        &path,
+        r#"{"server_url":"https://legacy.example.com","port":9464,"theme":"system"}"#,
+    )
+    .unwrap();
+    let cfg = load_config_from(&path);
+    assert_eq!(cfg.server_url, "https://legacy.example.com");
+    assert_eq!(cfg.device_id, None, "老配置无 device_id 字段 → None");
+}
+
+#[test]
+fn config_roundtrip_keeps_device_id() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.json");
+    let mut cfg = sample();
+    cfg.device_id = Some("uuid-1234".into());
+    save_config_to(&path, &cfg).unwrap();
+    let loaded = load_config_from(&path);
+    assert_eq!(
+        loaded.device_id.as_deref(),
+        Some("uuid-1234"),
+        "device_id 回环保留"
+    );
 }

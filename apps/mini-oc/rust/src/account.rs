@@ -47,7 +47,10 @@ fn mask(key: &str) -> String {
 pub async fn login(server_url: &str, key: &str) -> Result<AccountInfo, String> {
     tracing::info!("登录 {}（密钥 {}）", server_url, mask(key));
     let resp = http()
-        .post(format!("{}/api/user/info", server_url.trim_end_matches('/')))
+        .post(format!(
+            "{}/api/user/info",
+            server_url.trim_end_matches('/')
+        ))
         .json(&serde_json::json!({"key": key}))
         .send()
         .await
@@ -74,6 +77,13 @@ pub async fn login(server_url: &str, key: &str) -> Result<AccountInfo, String> {
     });
     cfg.bound_device = None; // 新登录重置绑定
     save_config(&cfg)?;
+    // 显式登录成功 → 后台静默上报设备（失败不影响登录结果）
+    tokio::spawn(async move {
+        let out = crate::api::report_registration().await;
+        if !out.ok {
+            tracing::warn!("登录后设备上报未成功（不影响登录）: {:?}", out.error);
+        }
+    });
     Ok(info)
 }
 
@@ -84,7 +94,11 @@ pub async fn bind_device(device_name: &str, pctype: &str, os: &str) -> Result<()
         return Err("未登录".into());
     };
     let server = cfg.server_url.clone();
-    let os_real = if os.is_empty() { pctype.to_string() } else { os.to_string() };
+    let os_real = if os.is_empty() {
+        pctype.to_string()
+    } else {
+        os.to_string()
+    };
     let resp = http()
         .post(format!("{}/api/device-bind", server))
         .json(&serde_json::json!({
@@ -117,4 +131,65 @@ pub fn logout() -> Result<(), String> {
     cfg.user = None;
     cfg.bound_device = None;
     save_config(&cfg)
+}
+
+// —— 设备上报注册（POST /api/device-register，key 认证）——
+
+/// 上报请求体（serde camelCase 对齐服务端契约）。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RegisterBody {
+    pub key: String,
+    /// 已持久化的设备 ID（首次上报为空串，服务端生成下发）
+    pub device_id: String,
+    /// 客户端描述（上报覆盖服务端 desc）
+    pub desc: String,
+    pub port: u16,
+    /// 平台：macos / windows
+    pub pctype: String,
+    /// 主机名
+    pub device_name: String,
+    /// 与 pctype 一致性由服务端校验（os ≠ pctype → 400）
+    pub os: String,
+}
+
+/// 上报响应（pending 态 enabled 恒 false）。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RegisterResult {
+    /// approved | pending
+    pub status: String,
+    pub device_id: String,
+    pub enabled: bool,
+}
+
+/// 设备上报注册（10s 超时，key 脱敏日志，同现有模式）。
+pub async fn register_device(server: &str, body: &RegisterBody) -> Result<RegisterResult, String> {
+    tracing::info!("设备上报 {}（密钥 {}）", server, mask(&body.key));
+    let resp = http()
+        .post(format!(
+            "{}/api/device-register",
+            server.trim_end_matches('/')
+        ))
+        .json(body)
+        .send()
+        .await
+        .map_err(|e| format!("网络错误：无法连接服务器（{e}）"))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body: serde_json::Value = resp.json().await.unwrap_or_default();
+        let msg = body["error"]["message"].as_str().unwrap_or("上报失败");
+        tracing::warn!("设备上报失败 HTTP {status}: {msg}");
+        return Err(format!("上报失败（HTTP {status}）：{msg}"));
+    }
+    let result: RegisterResult = resp
+        .json()
+        .await
+        .map_err(|e| format!("响应解析失败: {e}"))?;
+    tracing::info!(
+        "设备上报完成：{}（device {}）",
+        result.status,
+        result.device_id
+    );
+    Ok(result)
 }

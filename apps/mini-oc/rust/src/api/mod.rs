@@ -8,6 +8,9 @@ pub use crate::config::{ClientConfig, StoredUser};
 pub use crate::logbuf::LogLine;
 pub use crate::supervisor::ServiceState;
 
+// appenv 类型透传给 Dart（frb 需要类型定义在命名空间内可达）
+pub use crate::api::appenv::AppEnv;
+
 use crate::supervisor::{SupConfig, Supervisor};
 use mini_oc_core::ocapi::{OcApi, OcClient};
 use serde::{Deserialize, Serialize};
@@ -28,6 +31,23 @@ pub fn logout() -> Result<(), String> {
     crate::account::logout()
 }
 
+/// 读应用 env 配置（地址 / 记住密码 / 密码；同步：本地文件操作）。
+#[flutter_rust_bridge::frb(sync)]
+pub fn load_app_env() -> crate::api::appenv::AppEnv {
+    crate::api::appenv::load_app_env()
+}
+
+/// 写应用 env 配置（记住密码逻辑；docker 注入时不落文件）。
+pub fn save_app_env(cfg: crate::api::appenv::AppEnv) -> Result<(), String> {
+    crate::api::appenv::save_app_env(&cfg)
+}
+
+/// 生效服务器地址：env → config.json 兜底 → 默认 https://oc.isoops.com。
+#[flutter_rust_bridge::frb(sync)]
+pub fn server_url_effective() -> String {
+    crate::api::appenv::server_url_effective()
+}
+
 /// 读本地配置（同步：本地文件操作）。
 #[flutter_rust_bridge::frb(sync)]
 pub fn load_config() -> ClientConfig {
@@ -45,6 +65,7 @@ pub fn ping() -> String {
     "pong".into()
 }
 
+pub mod appenv;
 pub mod simple;
 
 // ---------------------------------------------------------------------------
@@ -146,7 +167,88 @@ async fn bound_device_brief() -> Result<Option<DeviceBrief>, String> {
         return Ok(None);
     };
     let info = crate::account::login(&cfg.server_url, &user.key).await?;
+    // 自动登录冷启动挂点：清单拉取成功 → 静默上报一次（幂等，服务端重复无害）
+    tokio::spawn(async move {
+        let out = crate::api::report_registration().await;
+        if !out.ok {
+            tracing::warn!("设备上报未成功（不影响云服务）: {:?}", out.error);
+        }
+    });
     Ok(info.devices.into_iter().find(|d| d.name == bound))
+}
+
+// ---------------------------------------------------------------------------
+// 设备上报注册
+// ---------------------------------------------------------------------------
+
+/// 上报结果（永不 panic：失败时 ok=false，错误装进 error 字段）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReportOutcome {
+    pub ok: bool,
+    /// approved | pending；失败为空串
+    pub status: String,
+    /// 服务端确认的设备 ID；失败为空串
+    pub device_id: String,
+    pub enabled: bool,
+    pub error: Option<String>,
+}
+
+/// 上报端口：绑定设备场景以清单端口为准不可得 → 退本地偏好（与 effective_port 一致）。
+fn report_port() -> u16 {
+    effective_port().unwrap_or(crate::config::ClientConfig::default().port)
+}
+
+/// 上报本机设备信息到 /api/device-register（幂等，重复调用无害）。
+///
+/// - 地址取 `server_url_effective()`（env 优先，比读 config 更稳）
+/// - 响应 deviceId 与 config 不同 → 原子写回 config.json
+/// - 永不 panic：所有错误装进 `ReportOutcome.error`，调用方静默降级
+pub async fn report_registration() -> ReportOutcome {
+    let inner = async {
+        let cfg = crate::config::load_config();
+        let user = cfg.user.as_ref().ok_or("未登录：无法上报设备")?;
+        let server = server_url_effective();
+        let os = std::env::consts::OS.to_string();
+        let body = crate::account::RegisterBody {
+            key: user.key.clone(),
+            device_id: cfg.device_id.clone().unwrap_or_default(),
+            desc: String::new(),
+            port: report_port(),
+            pctype: os.clone(),
+            device_name: whoami::devicename(),
+            os,
+        };
+        crate::account::register_device(&server, &body).await
+    };
+    match inner.await {
+        Ok(result) => {
+            // 响应 deviceId 与 config 不同 → 写回（save_config 本身是原子替换）
+            let mut cfg = crate::config::load_config();
+            if cfg.device_id.as_deref() != Some(result.device_id.as_str()) {
+                cfg.device_id = Some(result.device_id.clone());
+                if let Err(e) = crate::config::save_config(&cfg) {
+                    tracing::warn!("device_id 写回配置失败: {e}");
+                }
+            }
+            ReportOutcome {
+                ok: true,
+                status: result.status,
+                device_id: result.device_id,
+                enabled: result.enabled,
+                error: None,
+            }
+        }
+        Err(e) => {
+            tracing::warn!("设备上报失败（静默降级）: {e}");
+            ReportOutcome {
+                ok: false,
+                status: String::new(),
+                device_id: String::new(),
+                enabled: false,
+                error: Some(e),
+            }
+        }
+    }
 }
 
 /// 启动本地服务。
@@ -161,7 +263,11 @@ pub async fn start_cloud() -> Result<(), String> {
     let Some(device) = bound_device_brief().await? else {
         return Err("尚未绑定设备：请先在登录后选择要绑定的设备".into());
     };
-    crate::logbuf::push_log("system", "info", &format!("启动云服务（设备 {}，端口 {}）…", device.name, device.port));
+    crate::logbuf::push_log(
+        "system",
+        "info",
+        &format!("启动云服务（设备 {}，端口 {}）…", device.name, device.port),
+    );
     // rathole toml 生成（设备清单 → 单 service）
     let cfg = crate::config::load_config();
     let user = cfg.user.ok_or("未登录")?;
@@ -170,11 +276,16 @@ pub async fn start_cloud() -> Result<(), String> {
     std::fs::create_dir_all(&toml_dir).map_err(|e| format!("创建 rathole 目录失败: {e}"))?;
     let toml_path = toml_dir.join("global.toml");
     crate::rathole::write_settings_toml(&toml_path, &toml)?;
-    global_supervisor().start_cloud(device.port, &toml_path).await
+    global_supervisor()
+        .start_cloud(device.port, &toml_path)
+        .await
 }
 
 fn rathole_settings_dir() -> Result<std::path::PathBuf, String> {
-    Ok(crate::config::config_path().parent().map(|p| p.join("rathole/settings")).unwrap_or_else(|| "rathole/settings".into()))
+    Ok(crate::config::config_path()
+        .parent()
+        .map(|p| p.join("rathole/settings"))
+        .unwrap_or_else(|| "rathole/settings".into()))
 }
 
 /// 停止全部服务。
@@ -221,10 +332,13 @@ pub async fn list_projects_at(port: u16, key: &str) -> Result<Vec<ProjectSummary
     Ok(projects
         .into_iter()
         .map(|p| ProjectSummary {
-            name: p
-                .name
-                .clone()
-                .unwrap_or_else(|| p.canonical.rsplit('/').next().unwrap_or(&p.canonical).to_string()),
+            name: p.name.clone().unwrap_or_else(|| {
+                p.canonical
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or(&p.canonical)
+                    .to_string()
+            }),
             id: p.id,
             path: p.canonical,
             vcs: p.vcs,
@@ -240,7 +354,11 @@ pub async fn list_projects() -> Result<Vec<ProjectSummary>, String> {
 }
 
 /// 内部：按端口查询会话。
-pub async fn list_sessions_at(port: u16, key: &str, directory: Option<String>) -> Result<Vec<SessionSummary>, String> {
+pub async fn list_sessions_at(
+    port: u16,
+    key: &str,
+    directory: Option<String>,
+) -> Result<Vec<SessionSummary>, String> {
     let client = OcClient::new(&format!("http://127.0.0.1:{port}"), key);
     let sessions = client
         .sessions(directory.as_deref())

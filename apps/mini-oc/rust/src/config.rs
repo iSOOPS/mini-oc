@@ -28,6 +28,9 @@ pub struct ClientConfig {
     /// opencode 二进制路径覆盖
     #[serde(default)]
     pub opencode_bin: Option<String>,
+    /// 设备唯一 ID（服务端 /api/device-register 下发的 UUID；首次上报前为 None）
+    #[serde(default)]
+    pub device_id: Option<String>,
     /// system | light | dark
     #[serde(default = "default_theme")]
     pub theme: String,
@@ -49,6 +52,7 @@ impl Default for ClientConfig {
             bound_device: None,
             port: default_port(),
             opencode_bin: None,
+            device_id: None,
             theme: default_theme(),
         }
     }
@@ -61,7 +65,7 @@ pub fn config_path() -> PathBuf {
     dir.join("config.json")
 }
 
-fn default_data_dir() -> PathBuf {
+pub(crate) fn default_data_dir() -> PathBuf {
     #[cfg(target_os = "macos")]
     {
         if let Some(home) = std::env::var_os("HOME") {
@@ -74,7 +78,9 @@ fn default_data_dir() -> PathBuf {
             return PathBuf::from(appdata).join("mini-oc");
         }
     }
-    std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join("mini-oc-data")
+    std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join("mini-oc-data")
 }
 
 /// 读配置：文件缺失/损坏 → 默认值（不 panic）。
@@ -103,7 +109,7 @@ pub fn save_config_to(path: &std::path::Path, cfg: &ClientConfig) -> Result<(), 
     Ok(())
 }
 
-// —— frb 暴露的无参版本（同步：本地文件操作无 await 必要）—— 
+// —— frb 暴露的无参版本（同步：本地文件操作无 await 必要）——
 
 #[flutter_rust_bridge::frb(sync)]
 pub fn load_config() -> ClientConfig {
