@@ -1,12 +1,17 @@
 // API 封装：fetch + 401 软跳转约定 + 全部响应类型
 export interface ApiError { code: string; message: string }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit, opts?: { on401?: 'redirect' | 'passthrough' }): Promise<T> {
   const resp = await fetch(path, {
     headers: { 'Content-Type': 'application/json' },
     ...init,
   })
   if (resp.status === 401) {
+    if (opts?.on401 === 'passthrough') {
+      // 登录接口：透传后端真实错误（"密码错误"），不触发软跳转
+      const body = await resp.json().catch(() => ({ error: { code: 'unauthorized', message: 'unauthorized' } }))
+      throw body.error as ApiError
+    }
     // 软跳转：交给 router 守卫处理（V1 验证过的防刷新死循环模式）
     const err: ApiError = { code: 'unauthorized', message: '登录已过期' }
     window.dispatchEvent(new CustomEvent('mini-oc:unauthorized'))
@@ -72,7 +77,7 @@ export interface AdminUser {
 // —— 认证 ——
 export const api = {
   login: (key: string) =>
-    request<{ id: string; name: string }>('/api/login', { method: 'POST', body: JSON.stringify({ key }) }),
+    request<{ id: string; name: string }>('/api/login', { method: 'POST', body: JSON.stringify({ key }) }, { on401: 'passthrough' }),
   logout: () => request<{ ok: boolean }>('/api/logout', { method: 'POST' }),
   me: (signal?: AbortSignal) =>
     request<Me>('/api/me', { signal }),
@@ -92,7 +97,7 @@ export const api = {
     ),
 
   adminLogin: (password: string) =>
-    request<{ ok: boolean }>('/api/admin/login', { method: 'POST', body: JSON.stringify({ password }) }),
+    request<{ ok: boolean }>('/api/admin/login', { method: 'POST', body: JSON.stringify({ password }) }, { on401: 'passthrough' }),
   adminLogout: () => request<{ ok: boolean }>('/api/admin/logout', { method: 'POST' }),
   adminUsers: () => request<{ users: AdminUser[] }>('/api/admin/users'),
   adminCreateUser: (body: { name: string; devices: Partial<Device>[] }) =>

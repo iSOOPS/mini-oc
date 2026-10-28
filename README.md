@@ -21,21 +21,27 @@ docker network create app-net  # 首次；并把既有 SilverBullet 容器接入
 docker compose up -d --build
 ```
 
-本地开发：
+## 本地开发：
 
 ```bash
 cargo run -p mini-oc-web            # 后端 :8100（SB 不可用时接口 503，SPA 正常）
 cd apps/mini-oc-web/web && npm run dev   # Vite 开发服务器（/api 代理到 8100）
 ```
 
+本地运行零配置：未设置 `COOKIE_KEY_PATH` / `WEB_STATIC_DIR` 时自动回退本地默认——
+cookie key 写入 `<cwd>/data/cookie_key`，SPA 目录按布局探测（仓库根直接运行即可找到）。
+显式环境变量永远优先；容器部署由 Dockerfile `ENV` 注入 `/data/cookie_key` 与 `/app/web/dist`，行为不变。
+
 ## 环境变量
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `WEB_PORT` | 8100 | 监听端口 |
-| `WEB_STATIC_DIR` | web/dist | SPA 静态目录 |
-| `COOKIE_KEY_PATH` | /data/cookie_key | HMAC 密钥（首启自动生成） |
+| `WEB_STATIC_DIR` | 本地：布局探测（回退 `web/dist`）；容器：`/app/web/dist` | SPA 静态目录 |
+| `COOKIE_KEY_PATH` | 本地：`<cwd>/data/cookie_key`；容器：`/data/cookie_key` | HMAC 密钥（首启自动生成） |
 | `SB_BASE_URL` / `SB_USER` / `SB_PASSWORD` | — | SilverBullet 连接；**SB_PASSWORD 兼作超管密码** |
+
+> 「本地默认」仅在未设置对应环境变量时生效；显式变量永远优先。
 
 ## 运维约定（rathole）
 

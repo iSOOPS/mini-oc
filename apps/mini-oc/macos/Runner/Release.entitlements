@@ -4,5 +4,11 @@
 <dict>
 	<key>com.apple.security.app-sandbox</key>
 	<true/>
+	<!-- 出站网络：连 mini-oc-web / opencode serve -->
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<!-- 用户文件读写：rust 配置目录（~/Library/Application Support/mini-oc） -->
+	<key>com.apple.security.files.user-selected.read-write</key>
+	<true/>
 </dict>
 </plist>

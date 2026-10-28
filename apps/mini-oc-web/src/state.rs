@@ -26,12 +26,31 @@ impl AppState {
     ///
     /// - `SB_BASE_URL` / `SB_USER` / `SB_PASSWORD`：SilverBullet 连接（SB_PASSWORD 兼作超管密码）
     /// - `COOKIE_KEY_PATH`：HMAC 密钥路径（首启生成 32 字节，0600）
+    /// - `WEB_STATIC_DIR`：SPA 静态目录
+    ///
+    /// 显式变量永远优先（容器由 Dockerfile ENV 注入，行为不变）；
+    /// 未设置时回退本地默认（见 [`resolve_local_defaults`]）。
     pub fn from_env() -> AppResult<Self> {
         let base = std::env::var("SB_BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".into());
         let user = std::env::var("SB_USER").unwrap_or_else(|_| "admin".into());
         let pass = std::env::var("SB_PASSWORD").unwrap_or_default();
-        let key_path = std::env::var("COOKIE_KEY_PATH").unwrap_or_else(|_| "/data/cookie_key".into());
-        Self::new(&base, &user, &pass, PathBuf::from(key_path))
+        let (key_path, static_dir) = match (
+            std::env::var("COOKIE_KEY_PATH").ok(),
+            std::env::var("WEB_STATIC_DIR").ok(),
+        ) {
+            (Some(k), Some(s)) => (PathBuf::from(k), PathBuf::from(s)),
+            (key_env, static_env) => {
+                let cwd = std::env::current_dir()
+                    .map_err(|e| crate::error::AppError::Internal(format!("获取工作目录: {e}")))?;
+                let (local_key, local_static) = resolve_local_defaults(&cwd);
+                let key_path = key_env.map(PathBuf::from).unwrap_or(local_key);
+                let static_dir = static_env.map(PathBuf::from).unwrap_or(local_static);
+                (key_path, static_dir)
+            }
+        };
+        let mut state = Self::new(&base, &user, &pass, key_path)?;
+        state.static_dir = static_dir;
+        Ok(state)
     }
 
     pub fn new(sb_base: &str, sb_user: &str, sb_pass: &str, cookie_key_path: PathBuf) -> AppResult<Self> {
@@ -56,9 +75,28 @@ impl AppState {
     }
 }
 
+/// 本地默认值：未设置环境变量时的回退逻辑（容器由 Dockerfile ENV 显式注入，不走此处）。
+///
+/// - cookie key：`<cwd>/data/cookie_key`（仓库 `data/` 已 gitignore）
+/// - SPA 目录：按常见布局探测含 `index.html` 的 dist（仓库根 / apps/mini-oc-web / 本目录）；
+///   探测失败回退 `web/dist`（页面 404 提示构建 SPA，服务照常启动）
+pub fn resolve_local_defaults(cwd: &std::path::Path) -> (PathBuf, PathBuf) {
+    const CANDIDATES: [&str; 4] = [
+        "apps/mini-oc-web/web/dist",
+        "apps/mini-oc-web/web",
+        "web/dist",
+        "web",
+    ];
+    let static_dir = CANDIDATES
+        .iter()
+        .map(|p| cwd.join(p))
+        .find(|p| p.join("index.html").is_file())
+        .unwrap_or_else(|| cwd.join("web/dist"));
+    (cwd.join("data/cookie_key"), static_dir)
+}
+
 /// 加载或首次生成 HMAC cookie 密钥（32 字节随机，0600 权限）。
-fn load_or_create_key(path: &PathBuf) -> AppResult<Vec<u8>> {
-    if path.exists() {
+fn load_or_create_key(path: &PathBuf) -> AppResult<Vec<u8>> {    if path.exists() {
         let key = std::fs::read(path).map_err(|e| crate::error::AppError::Internal(format!("读取 cookie key: {e}")))?;
         if key.len() == 32 {
             return Ok(key);

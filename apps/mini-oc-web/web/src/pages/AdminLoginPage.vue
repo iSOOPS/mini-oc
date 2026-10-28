@@ -13,7 +13,7 @@ async function submit() {
   busy.value = true
   error.value = ''
   try {
-    await api.adminLogin(password.value)
+    await api.adminLogin(password.value.trim())
     sessionStorage.setItem('mini_oc_admin', '1')
     router.push('/admin')
   } catch (e: any) {
