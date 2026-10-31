@@ -12,9 +12,8 @@ on:
 env:
   REGISTRY: harbor.gxrs.net
   # Harbor 项目 / 镜像名。
-  # 注意：Harbor 内置的 library 项目是 Docker Hub 官方镜像的代理缓存项目，
-  # 对其推送恒返回 401（Harbor 不向代理缓存项目授予 push），必须使用普通项目。
-  IMAGE_NAME: open-library/mini-oc-web
+  # library 为私有项目，需用在该项目内有角色的账号（机器人账号 robot$xxx）。
+  IMAGE_NAME: library/mini-oc-web
   # 基础镜像来源，对应 Dockerfile 的 ARG REGISTRY。
   # 国内网络可改为镜像加速域名（如 docker.m.daocloud.io）。
   BASE_REGISTRY: docker.io
