@@ -3,7 +3,7 @@ name: Build and Push to Harbor
 on:
   push:
     branches:
-      - main
+      # 打包源分支：mini-oc-web 的实际开发分支（main 目前仅有 LICENSE/README）
       - feature/v2
     tags:
       - 'v*'
@@ -98,9 +98,10 @@ jobs:
             type=semver,pattern={{raw}}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            # 推送分支时：main / feature-v2；默认分支额外带 latest
+            # 推送分支时：feature-v2
             type=ref,event=branch
-            type=raw,value=latest,enable={{is_default_branch}}
+            # 打包源分支 feature/v2 的构建附带 latest
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/feature/v2' }}
             # 任意提交：完整 commit sha，便于按提交定位镜像
             type=sha,format=long
 
