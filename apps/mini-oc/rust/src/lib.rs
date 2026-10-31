@@ -15,6 +15,8 @@ pub mod account;
 pub mod api;
 pub mod config;
 pub mod logbuf;
+pub mod portkill;
 pub mod rathole;
+pub mod runtime;
 pub mod supervisor;
 pub mod term_spawn;

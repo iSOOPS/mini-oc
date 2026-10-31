@@ -69,6 +69,30 @@ pub mod appenv;
 pub mod simple;
 
 // ---------------------------------------------------------------------------
+// 端口占用处理（I10）
+// ---------------------------------------------------------------------------
+
+/// 端口占用错误前缀（Dart 侧判定弹框用；与 Rust 常量同值，frb 不透传 const）。
+#[flutter_rust_bridge::frb(sync)]
+pub fn port_err_prefix() -> String {
+    crate::portkill::PORT_ERR_PREFIX.to_string()
+}
+
+/// 查询端口占用进程（无占用返回 null）。
+#[flutter_rust_bridge::frb(sync)]
+pub fn query_port_occupant(port: u16) -> Option<crate::portkill::PortOccupant> {
+    crate::portkill::port_occupant(port)
+}
+
+/// 杀掉端口占用者并等待端口释放（详见 portkill 模块文档）。
+pub async fn kill_port_occupant(port: u16) -> Result<(), String> {
+    // lsof/ps/杀进程 + 端口轮询均为阻塞调用，放 blocking 线程池防卡 frb runtime
+    tokio::task::spawn_blocking(move || crate::portkill::kill_port(port))
+        .await
+        .map_err(|e| format!("kill_port 任务失败: {e}"))?
+}
+
+// ---------------------------------------------------------------------------
 // 服务编排（全局单例）
 // ---------------------------------------------------------------------------
 
@@ -138,13 +162,14 @@ fn global_supervisor() -> &'static Supervisor {
             probe: real_probe(),
         });
         // 后台监督 + 日志节流循环
-        tokio::spawn(async move {
+        // （I9：跑共享 runtime——本函数可能在无 tokio 上下文的线程被调起）
+        crate::runtime::spawn_on_runtime(async move {
             // run_monitor 需要持有同一实例——通过再次 get（OnceLock 已初始化）
             if let Some(s) = SUP.get() {
                 s.run_monitor().await;
             }
         });
-        tokio::spawn(async move {
+        crate::runtime::spawn_on_runtime(async move {
             crate::logbuf::flush_loop().await;
         });
         sup
@@ -168,7 +193,7 @@ async fn bound_device_brief() -> Result<Option<DeviceBrief>, String> {
     };
     let info = crate::account::login(&cfg.server_url, &user.key).await?;
     // 自动登录冷启动挂点：清单拉取成功 → 静默上报一次（幂等，服务端重复无害）
-    tokio::spawn(async move {
+    crate::runtime::spawn_on_runtime(async move {
         let out = crate::api::report_registration().await;
         if !out.ok {
             tracing::warn!("设备上报未成功（不影响云服务）: {:?}", out.error);
@@ -190,6 +215,8 @@ pub struct ReportOutcome {
     /// 服务端确认的设备 ID；失败为空串
     pub device_id: String,
     pub enabled: bool,
+    /// 批准设备是否已自动完成绑定（approved + enabled + 绑定请求成功）
+    pub bound: bool,
     pub error: Option<String>,
 }
 
@@ -202,6 +229,8 @@ fn report_port() -> u16 {
 ///
 /// - 地址取 `server_url_effective()`（env 优先，比读 config 更稳）
 /// - 响应 deviceId 与 config 不同 → 原子写回 config.json
+/// - approved + enabled → 自动绑定：拉清单找到本机设备 → device-bind →
+///   本地 bound_device 写盘（管理员批准即信任，免去重新登录选择）
 /// - 永不 panic：所有错误装进 `ReportOutcome.error`，调用方静默降级
 pub async fn report_registration() -> ReportOutcome {
     let inner = async {
@@ -232,11 +261,21 @@ pub async fn report_registration() -> ReportOutcome {
                     tracing::warn!("device_id 写回配置失败: {e}");
                 }
             }
+            // 批准 + 启用 → 自动绑定（幂等：已绑定设备重复 bind 无害）
+            let bound = if result.status == "approved" && result.enabled {
+                auto_bind_approved_device(&result.device_id).await.unwrap_or_else(|e| {
+                    tracing::warn!("批准后自动绑定未成功（不影响上报）: {e}");
+                    false
+                })
+            } else {
+                false
+            };
             ReportOutcome {
                 ok: true,
                 status: result.status,
                 device_id: result.device_id,
                 enabled: result.enabled,
+                bound,
                 error: None,
             }
         }
@@ -247,10 +286,120 @@ pub async fn report_registration() -> ReportOutcome {
                 status: String::new(),
                 device_id: String::new(),
                 enabled: false,
+                bound: false,
                 error: Some(e),
             }
         }
     }
+}
+
+/// 只读上报状态查询（I12：设置页进入时调用，无副作用）。
+///
+/// 与 [`report_registration`] 的区别：不 POST device-register、不写 config、
+/// 不触发自动绑定——仅拉清单判断本机设备当前状态，供 UI 恢复真实上报态
+/// （App 重启后内存态丢失，不能显示「尚未上报」）。
+///
+/// 匹配顺序：config.device_id → 本机 device_name+pctype。
+/// 清单未命中 → status="pending"（服务端不下发 pending 明细，无法区分
+/// 「待审核」与「未上报」）；网络失败 → ok=false。
+pub async fn query_registration() -> ReportOutcome {
+    let inner = async {
+        let cfg = crate::config::load_config();
+        let user = cfg.user.clone().ok_or("未登录")?;
+        let server = server_url_effective();
+        let devices = fetch_devices(&server, &user.key).await?;
+        let host = whoami::devicename();
+        let os = std::env::consts::OS.to_string();
+        let hit = devices.iter().find(|d| {
+            !cfg.device_id.as_deref().unwrap_or("").is_empty()
+                && d.device_id == cfg.device_id.as_deref().unwrap_or("")
+        }).or_else(|| {
+            devices.iter().find(|d| d.device_name == host && d.pctype == os)
+        });
+        Ok::<_, String>((hit.cloned(), cfg.device_id.clone().unwrap_or_default()))
+    };
+    match inner.await {
+        Ok((Some(dev), known_id)) => ReportOutcome {
+            ok: true,
+            status: "approved".into(),
+            device_id: if dev.device_id.is_empty() {
+                known_id
+            } else {
+                dev.device_id.clone()
+            },
+            enabled: dev.enabled,
+            bound: dev.bound,
+            error: None,
+        },
+        Ok((None, _)) => ReportOutcome {
+            ok: true,
+            status: "pending".into(),
+            device_id: String::new(),
+            enabled: false,
+            bound: false,
+            error: None,
+        },
+        Err(e) => {
+            tracing::warn!("上报状态查询失败: {e}");
+            ReportOutcome {
+                ok: false,
+                status: String::new(),
+                device_id: String::new(),
+                enabled: false,
+                bound: false,
+                error: Some(e),
+            }
+        }
+    }
+}
+
+/// 拉属主设备清单（GET-语义的 user/info，无副作用：不写配置、不触发上报）。
+pub(crate) async fn fetch_devices(server_url: &str, key: &str) -> Result<Vec<crate::account::DeviceBrief>, String> {
+    let resp = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("http client: {e}"))?
+        .post(format!("{}/api/user/info", server_url.trim_end_matches('/')))
+        .json(&serde_json::json!({"key": key}))
+        .send()
+        .await
+        .map_err(|e| format!("网络错误：无法连接服务器（{e}）"))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        return Err(format!("拉取清单失败（HTTP {status}）"));
+    }
+    let info: crate::account::AccountInfo = resp
+        .json()
+        .await
+        .map_err(|e| format!("响应解析失败: {e}"))?;
+    Ok(info.devices)
+}
+
+/// 批准后自动绑定：拉属主清单 → 找到本机（device_name+pctype 匹配）→
+/// device-bind 写服务端 bound=true + 本地 bound_device 持久化。
+///
+/// 失败返回 Err（调用方仅告警，不影响上报结果）。
+async fn auto_bind_approved_device(_device_id: &str) -> Result<bool, String> {
+    let cfg = crate::config::load_config();
+    // 已绑定 → 无需重复（幂等出口）
+    if cfg.bound_device.is_some() {
+        return Ok(true);
+    }
+    let user = cfg.user.clone().ok_or("未登录")?;
+    // 拉最新清单（无副作用版本）
+    let devices = fetch_devices(&cfg.server_url, &user.key).await?;
+    // DeviceBrief 无 device_id 字段 → 按 device_name（whoami 主机名）+ pctype 匹配
+    let host = whoami::devicename();
+    let pctype = std::env::consts::OS.to_string();
+    let device = devices
+        .into_iter()
+        .find(|d| d.device_name == host && d.pctype == pctype)
+        .ok_or("清单中未找到本机设备（可能尚未批准或已停用）")?;
+    // 服务端核验 + 双端持久化
+    let os = pctype.clone();
+    crate::account::bind_device(&device.name, &pctype, &os).await?;
+    tracing::info!("批准设备已自动绑定：{}", device.name);
+    Ok(true)
 }
 
 /// 启动本地服务。
@@ -260,17 +409,25 @@ pub async fn start_local() -> Result<(), String> {
     global_supervisor().start_local(port).await
 }
 
-/// 启动云服务（需已登录并绑定设备；端口以清单为准）。
-pub async fn start_cloud() -> Result<(), String> {
+/// 停止本地服务（保留隧道）：LocalOnly → Off；Cloud → TunnelOnly（I20）。
+pub async fn stop_local() -> Result<(), String> {
+    crate::logbuf::push_log("system", "info", "停止本地服务…");
+    global_supervisor().stop_serve().await
+}
+
+/// 生成 rathole toml（绑定设备清单 → 单 service）。
+/// 返回 (设备端口, toml 路径)；隧道/全部启动共用。
+async fn prepare_rathole() -> Result<(u16, std::path::PathBuf), String> {
     let Some(device) = bound_device_brief().await? else {
         return Err("尚未绑定设备：请先在登录后选择要绑定的设备".into());
     };
-    crate::logbuf::push_log(
-        "system",
-        "info",
-        &format!("启动云服务（设备 {}，端口 {}）…", device.name, device.port),
-    );
-    // rathole toml 生成（设备清单 → 单 service）
+    // 前置检查（I17）：rathole 二进制不存在 → 可行动的明确错误
+    // （否则 spawn ENOENT 只报泛化的「rathole 启动失败: No such file」）
+    if crate::rathole::resolve_rathole_bin().is_none() {
+        return Err(
+            "未找到 rathole 客户端：请通过 RATHOLE_BIN 指定路径，或将 rathole 安装到 PATH".into(),
+        );
+    }
     let cfg = crate::config::load_config();
     let user = cfg.user.ok_or("未登录")?;
     let toml = crate::rathole::rathole_toml(&device, &user.key)?;
@@ -278,9 +435,32 @@ pub async fn start_cloud() -> Result<(), String> {
     std::fs::create_dir_all(&toml_dir).map_err(|e| format!("创建 rathole 目录失败: {e}"))?;
     let toml_path = toml_dir.join("global.toml");
     crate::rathole::write_settings_toml(&toml_path, &toml)?;
-    global_supervisor()
-        .start_cloud(device.port, &toml_path)
-        .await
+    Ok((device.port, toml_path))
+}
+
+/// 仅启动隧道（I20）：只起 rathole，不启动 serve（需已登录并绑定设备）。
+pub async fn start_tunnel() -> Result<(), String> {
+    crate::logbuf::push_log("system", "info", "启动隧道（仅 rathole）…");
+    let (_port, toml_path) = prepare_rathole().await?;
+    global_supervisor().start_tunnel(&toml_path).await
+}
+
+/// 停止隧道（保留本地服务）：Cloud → LocalOnly；TunnelOnly → Off（I20）。
+pub async fn stop_tunnel() -> Result<(), String> {
+    crate::logbuf::push_log("system", "info", "停止隧道…");
+    global_supervisor().stop_tunnel().await
+}
+
+/// 启动全部（I20，原「云服务」语义）：隧道 + 本地服务（端口以清单为准，
+/// 同端口 serve 复用；已跑隧道复用）。
+pub async fn start_all() -> Result<(), String> {
+    let (port, toml_path) = prepare_rathole().await?;
+    crate::logbuf::push_log(
+        "system",
+        "info",
+        &format!("启动全部（本地服务 + 隧道，端口 {port}）…"),
+    );
+    global_supervisor().start_all(port, &toml_path).await
 }
 
 fn rathole_settings_dir() -> Result<std::path::PathBuf, String> {
@@ -412,9 +592,12 @@ pub fn open_in_terminal(directory: String, session_id: Option<String>) -> Result
 use crate::frb_generated::StreamSink;
 
 /// 日志订阅（frb StreamSink 标准流模式）。
+///
+/// 本函数以 wrap_normal 模式在 frb 线程池的普通线程上执行（无 tokio 上下文），
+/// 桥接循环必须走共享 runtime（I9）。
 pub fn subscribe_logs(sink: StreamSink<crate::logbuf::LogLine>) -> Result<(), String> {
     let mut rx = crate::logbuf::subscribe_logs_channel();
-    tokio::spawn(async move {
+    crate::runtime::spawn_on_runtime(async move {
         while let Some(line) = rx.recv().await {
             if sink.add(line).is_err() {
                 break; // Dart 侧关闭
@@ -425,9 +608,11 @@ pub fn subscribe_logs(sink: StreamSink<crate::logbuf::LogLine>) -> Result<(), St
 }
 
 /// 服务状态流订阅（UI 监听模式切换/崩溃）。
+///
+/// 同上：wrap_normal 模式 + 共享 runtime（I9）。
 pub fn subscribe_state(sink: StreamSink<ServiceState>) -> Result<(), String> {
     let mut rx = global_supervisor().subscribe();
-    tokio::spawn(async move {
+    crate::runtime::spawn_on_runtime(async move {
         // 先推当前快照
         if sink.add(global_supervisor().state()).is_ok() {
             while let Some(st) = rx.recv().await {

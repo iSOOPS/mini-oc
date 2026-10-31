@@ -60,6 +60,9 @@ async fn user_info(
 #[allow(dead_code)]
 struct BindBody {
     key: String,
+    /// 客户端统一 camelCase 契约（I 修复：原 snake_case user_id 导致
+    /// 客户端 device-bind 全部 422 Unprocessable Entity）
+    #[serde(rename = "userId")]
     user_id: String,
     name: String,
     bound: bool,
@@ -405,8 +408,8 @@ async fn sessions(
 // 会话跳转 + 设备详情（Task 9）
 // ---------------------------------------------------------------------------
 
-/// 跳转：BFF 代设备签发 pair code → 返回/302 一次性 connect 链接。
-/// 设备不可达/凭据不一致 → 显式 502，无任何 legacy 回退。
+/// 跳转：BFF 代设备签发 pair code，有 session 时换 token 拼会话深链，
+/// 否则返回一次性 connect 链接。设备不可达/凭据不一致 → 显式 502。
 async fn jump(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -416,15 +419,31 @@ async fn jump(
     use axum::http::StatusCode;
 
     let (user, device) = find_device(&state, &headers, &name).await?;
-    let _directory = params.get("directory"); // 目录参数由设备端 connect 会话上下文使用
-    let _session = params.get("session");
+    let session = params.get("session").cloned();
 
     let tunnel = tunnel_base_url(&device.public_url, device.port)
         .map_err(|e| AppError::InvalidTarget(e.to_string()))?;
     let client = OcClient::new(&tunnel, &user.key);
     let code = client.pair().await.map_err(oc_err)?;
-    let url = crate::jump::connect_url(&tunnel, &code);
-    crate::jump::validate_jump_url(&url, &tunnel)?;
+
+    // connect 链接（旧行为：登录到 Web UI 首页，无会话定位）
+    let connect_url = || -> AppResult<String> {
+        let u = crate::jump::connect_url(&tunnel, &code);
+        crate::jump::validate_jump_url(&u, &tunnel)?;
+        Ok(u)
+    };
+
+    // 有 session 时：code 换 token → 深链定位会话；换 token 失败回退 connect 链接
+    let url = match session.as_deref().filter(|s| !s.is_empty()) {
+        Some(sid) => match client.connect(&code).await {
+            Ok(token) => crate::jump::session_deep_link(&tunnel, sid, &token)?,
+            Err(e) => {
+                tracing::warn!(%e, "pair code 换 token 失败，回退 connect 链接");
+                connect_url()?
+            }
+        },
+        None => connect_url()?,
+    };
 
     if params.get("format").map(|f| f == "json").unwrap_or(false) {
         let body = serde_json::json!({"url": url, "expiresIn": 300});

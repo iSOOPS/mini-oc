@@ -7,7 +7,16 @@ import 'frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-enum ServiceMode { off, localOnly, cloud }
+enum ServiceMode {
+  off,
+  localOnly,
+
+  /// 仅隧道（rathole），无 serve（I20）
+  tunnelOnly,
+
+  /// serve + rathole 全开（原 Cloud 语义，start_all 目标态）
+  cloud,
+}
 
 /// frb 暴露的状态快照。
 class ServiceState {

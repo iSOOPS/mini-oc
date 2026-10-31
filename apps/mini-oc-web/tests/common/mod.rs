@@ -34,7 +34,10 @@ pub async fn spawn_app_with_static(sb: &MockServer, static_dir: Option<String>) 
 pub async fn mount_sb_users(sb: &MockServer, body: &str) {
     Mock::given(method("POST"))
         .and(path("/.auth"))
-        .respond_with(ResponseTemplate::new(200).append_header("set-cookie", "auth_127_0_0_1=jwt-token; Path=/"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .append_header("set-cookie", "auth_127_0_0_1=jwt-token; Path=/"),
+        )
         .named("sb-login")
         .mount(sb)
         .await;

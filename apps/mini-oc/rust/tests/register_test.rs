@@ -268,3 +268,129 @@ async fn report_registration_empty_device_id_not_persisted() {
     // 空 deviceId 不落盘（避免 Some("") 污染 config）
     assert_eq!(rust_lib_mini_oc::config::load_config().device_id, None);
 }
+
+// ---------------------------------------------------------------------------
+// 批准后自动绑定（approved + enabled → bind_device）
+// ---------------------------------------------------------------------------
+
+/// 预置服务端用户清单：本机设备已在 devices 中（管理员批准后的状态）。
+/// deviceName 必须是真实主机名（服务端 approve 转正时来自上报请求体）。
+fn user_info_with_device(name: &str) -> serde_json::Value {
+    serde_json::json!({
+        "id": "100001",
+        "name": "samuel",
+        "key": "k".repeat(32),
+        "devices": [
+            {"desc": "d", "name": name, "port": 9464, "pctype": "macos",
+             "deviceName": whoami::devicename(), "bound": false,
+             "publicUrl": "https://oc.example.com"}
+        ]
+    })
+}
+
+#[tokio::test]
+async fn report_approved_enabled_auto_binds_device() {
+    let (server, _guard) = setup().await;
+    seed_logged_in_config(&server.uri(), Some("uuid-approved"));
+
+    // 上报：本机已获批（approved + enabled）
+    Mock::given(method("POST"))
+        .and(path("/api/device-register"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "status": "approved", "deviceId": "uuid-approved", "enabled": true
+        })))
+        .mount(&server)
+        .await;
+    // 上报后拉清单（device-bind 前置）：清单含本机设备
+    Mock::given(method("POST"))
+        .and(path("/api/user/info"))
+        .respond_with(ResponseTemplate::new(200)
+            .set_body_json(user_info_with_device("office-mac")))
+        .mount(&server)
+        .await;
+    // 自动绑定请求：bound=true
+    Mock::given(method("POST"))
+        .and(path("/api/device-bind"))
+        .and(body_partial_json(serde_json::json!({
+            "name": "office-mac",
+            "bound": true,
+            "userId": "100001"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok": true})))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let out = report_registration().await;
+    assert!(out.ok, "上报应成功: {:?}", out.error);
+    assert!(out.bound, "approved+enabled 应触发自动绑定");
+    // 本地 bound_device 已写盘
+    let cfg = rust_lib_mini_oc::config::load_config();
+    assert_eq!(cfg.bound_device.as_deref(), Some("office-mac"), "本地绑定已持久化");
+    assert_eq!(cfg.user.unwrap().name, "samuel", "写回不丢其他字段");
+}
+
+#[tokio::test]
+async fn report_pending_does_not_bind() {
+    let (server, _guard) = setup().await;
+    seed_logged_in_config(&server.uri(), Some("uuid-pending"));
+
+    Mock::given(method("POST"))
+        .and(path("/api/device-register"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "status": "pending", "deviceId": "uuid-pending", "enabled": false
+        })))
+        .mount(&server)
+        .await;
+    // 不应出现 user/info 与 device-bind 请求（mock 未挂载 → 若调用则连接失败报错）
+
+    let out = report_registration().await;
+    assert!(out.ok);
+    assert!(!out.bound, "pending 态不绑定");
+    assert!(rust_lib_mini_oc::config::load_config().bound_device.is_none());
+}
+
+#[tokio::test]
+async fn report_approved_not_enabled_does_not_bind() {
+    let (server, _guard) = setup().await;
+    seed_logged_in_config(&server.uri(), Some("uuid-disabled"));
+
+    Mock::given(method("POST"))
+        .and(path("/api/device-register"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "status": "approved", "deviceId": "uuid-disabled", "enabled": false
+        })))
+        .mount(&server)
+        .await;
+
+    let out = report_registration().await;
+    assert!(out.ok);
+    assert!(!out.bound, "已停用设备不绑定");
+    assert!(rust_lib_mini_oc::config::load_config().bound_device.is_none());
+}
+
+#[tokio::test]
+async fn report_approved_bind_server_error_still_ok() {
+    let (server, _guard) = setup().await;
+    seed_logged_in_config(&server.uri(), Some("uuid-x"));
+
+    Mock::given(method("POST"))
+        .and(path("/api/device-register"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "status": "approved", "deviceId": "uuid-x", "enabled": true
+        })))
+        .mount(&server)
+        .await;
+    // 清单拉取失败（网络/服务端错误）→ 绑定失败但上报本身仍 ok
+    Mock::given(method("POST"))
+        .and(path("/api/user/info"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&server)
+        .await;
+
+    let out = report_registration().await;
+    assert!(out.ok, "上报成功不应因绑定失败而失败");
+    assert!(!out.bound);
+    // 本地也不写 bound_device（绑定未确认）
+    assert!(rust_lib_mini_oc::config::load_config().bound_device.is_none());
+}

@@ -57,13 +57,9 @@ pub struct SessionInfo {
     #[serde(default)]
     pub title: Option<String>,
     /// location.directory（宽松反序列化兼容平级/嵌套两形态）
-    #[serde(default = "empty_string")]
+    #[serde(default)]
     pub directory: String,
     pub time: SessionTime,
-}
-
-fn empty_string() -> String {
-    String::new()
 }
 
 impl SessionInfo {
@@ -140,6 +136,7 @@ pub trait OcApi: Send + Sync {
     async fn projects(&self) -> Result<Vec<Project>, OcError>;
     async fn sessions(&self, directory: Option<&str>) -> Result<Vec<SessionInfo>, OcError>;
     async fn pair(&self) -> Result<String, OcError>;
+    async fn connect(&self, code: &str) -> Result<String, OcError>;
 }
 
 // ---------------------------------------------------------------------------
@@ -248,5 +245,21 @@ impl OcApi for OcClient {
         }
         let resp: PairResp = Self::decode(resp).await?;
         Ok(resp.code)
+    }
+
+    /// 用一次性 pair code 换 pair token（`GET /auth/connect/{code}` → `{token}`）。
+    ///
+    /// 端点公开（code 即凭据），无需 basic auth；curl 无 -u 实测返回 JSON，
+    /// 而浏览器形态（Accept: text/html）才 302 → `/`。故此处用 reqwest 默认
+    /// 无 Accept 头拿 JSON。code 一次性：复用/伪造返回 401。
+    async fn connect(&self, code: &str) -> Result<String, OcError> {
+        let url = format!("{}/auth/connect/{code}", self.base);
+        let resp = self.http.get(&url).send().await.map_err(|_| OcError::Transport)?;
+        #[derive(Deserialize)]
+        struct ConnectResp {
+            token: String,
+        }
+        let resp: ConnectResp = Self::decode(resp).await?;
+        Ok(resp.token)
     }
 }

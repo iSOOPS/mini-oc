@@ -112,6 +112,95 @@ async fn jump_pair_url_guard_rejects_foreign_origin() {
 }
 
 #[tokio::test]
+async fn jump_with_session_returns_deep_link() {
+    let sb = MockServer::start().await;
+    let device = MockServer::start().await;
+    // pair → code
+    Mock::given(method("POST"))
+        .and(path("/api/pair"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            serde_json::json!({"code": "610bsBT_9EqdC", "expires_in": 300}),
+        ))
+        .expect(1)
+        .mount(&device).await;
+    // connect → token
+    Mock::given(method("GET"))
+        .and(path("/auth/connect/610bsBT_9EqdC"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            serde_json::json!({"token": "1796025749.EKzkuAmKP9wfB4QAWNYZNKlPddvzWv9ruxIYnWJ4ZHg"}),
+        ))
+        .expect(1)
+        .mount(&device).await;
+
+    let mut user = test_user();
+    user.devices[0].public_url = device.uri();
+    mount_sb_users(&sb, &users_json(vec![user])).await;
+    let base = spawn_app(&sb).await;
+    let cookie = login_cookie(&base).await;
+
+    let resp = reqwest::Client::new()
+        .get(format!(
+            "{base}/api/devices/macbook-pro/jump?directory=/Users/x/proj&session=ses_abc123&format=json"
+        ))
+        .header("cookie", &cookie)
+        .send().await.unwrap();
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    // 深链 = session_deep_link(隧道, session, token)，验证 handler 接线正确
+    let expected = mini_oc_web::jump::session_deep_link(
+        &device.uri(),
+        "ses_abc123",
+        "1796025749.EKzkuAmKP9wfB4QAWNYZNKlPddvzWv9ruxIYnWJ4ZHg",
+    )
+    .unwrap();
+    assert_eq!(body["url"], expected);
+    assert_eq!(body["expiresIn"], 300);
+    device.verify().await;
+}
+
+#[tokio::test]
+async fn jump_with_session_falls_back_to_connect_on_token_failure() {
+    // pair 成功，但 connect 换 token 失败（如 code 被消费）→ 回退 connect 链接（旧行为，至少能登录）
+    let sb = MockServer::start().await;
+    let device = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/pair"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            serde_json::json!({"code": "610bsBT_9EqdC", "expires_in": 300}),
+        ))
+        .expect(1)
+        .mount(&device).await;
+    Mock::given(method("GET"))
+        .and(path("/auth/connect/610bsBT_9EqdC"))
+        .respond_with(ResponseTemplate::new(401).set_body_json(
+            serde_json::json!({"_tag": "UnauthorizedError", "message": "Authentication required"}),
+        ))
+        .expect(1)
+        .mount(&device).await;
+
+    let mut user = test_user();
+    user.devices[0].public_url = device.uri();
+    mount_sb_users(&sb, &users_json(vec![user])).await;
+    let base = spawn_app(&sb).await;
+    let cookie = login_cookie(&base).await;
+
+    let resp = reqwest::Client::new()
+        .get(format!(
+            "{base}/api/devices/macbook-pro/jump?directory=/Users/x/proj&session=ses_abc123&format=json"
+        ))
+        .header("cookie", &cookie)
+        .send().await.unwrap();
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(
+        body["url"],
+        format!("{}/auth/connect/610bsBT_9EqdC", device.uri()),
+        "token 换取失败应回退 connect 链接"
+    );
+    device.verify().await;
+}
+
+#[tokio::test]
 async fn device_detail_returns_no_credentials() {
     let sb = MockServer::start().await;
     let user = test_user();

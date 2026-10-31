@@ -5,7 +5,6 @@ use axum::http::{header, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 pub mod admin_routes;

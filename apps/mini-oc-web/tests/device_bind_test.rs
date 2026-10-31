@@ -96,7 +96,7 @@ async fn device_bind_writes_back_and_updates_timestamp() {
         .post(format!("{base}/api/device-bind"))
         .json(&serde_json::json!({
             "key": user.key,
-            "user_id": user.id,
+            "userId": user.id,
             "name": "macbook-pro",
             "bound": true,
             "pctype": "macos",
@@ -112,6 +112,47 @@ async fn device_bind_writes_back_and_updates_timestamp() {
     sb.verify().await;
 }
 
+/// 回归（I 修复）：客户端实际发送 camelCase `userId`（项目统一 serde 契约）。
+/// 服务端 BindBody 原期待 snake_case `user_id` → 全部 422 Unprocessable Entity，
+/// 自动绑定/登录弹层绑定从未真正联通。本用例锁定 camelCase 必须被接受。
+#[tokio::test]
+async fn device_bind_accepts_camel_case_userid_from_client() {
+    let sb = MockServer::start().await;
+    let user = test_user();
+    mount_sb_users(&sb, &users_json(vec![user.clone()])).await;
+    Mock::given(method("PUT"))
+        .and(path("/.fs/web/opencode/config.md"))
+        .and(body_string_contains("\"bound\": true"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&sb)
+        .await;
+    let base = spawn_app(&sb).await;
+
+    // 与 rust_lib_mini_oc::account::bind_device 的请求体逐字段一致
+    let resp = reqwest::Client::new()
+        .post(format!("{base}/api/device-bind"))
+        .json(&serde_json::json!({
+            "key": user.key,
+            "userId": user.id,
+            "name": "macbook-pro",
+            "bound": true,
+            "pctype": "macos",
+            "deviceName": "New-MacBook",
+            "os": "macos"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        200,
+        "camelCase userId 必须可解析（客户端契约）"
+    );
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["ok"], true);
+    sb.verify().await;
+}
+
 #[tokio::test]
 async fn device_bind_os_mismatch_403() {
     let sb = MockServer::start().await;
@@ -122,7 +163,7 @@ async fn device_bind_os_mismatch_403() {
         .post(format!("{base}/api/device-bind"))
         .json(&serde_json::json!({
             "key": test_user().key,
-            "user_id": "100001",
+            "userId": "100001",
             "name": "macbook-pro",
             "bound": true,
             "pctype": "macos",
@@ -148,7 +189,7 @@ async fn device_bind_cross_user_key_403() {
         .post(format!("{base}/api/device-bind"))
         .json(&serde_json::json!({
             "key": user.key,
-            "user_id": "100999",
+            "userId": "100999",
             "name": "macbook-pro",
             "bound": true,
             "pctype": "macos",
@@ -250,7 +291,7 @@ async fn disabled_device_bind_404() {
         .post(format!("{base}/api/device-bind"))
         .json(&serde_json::json!({
             "key": user.key,
-            "user_id": user.id,
+            "userId": user.id,
             "name": "macbook-pro",
             "bound": true,
             "pctype": "macos",

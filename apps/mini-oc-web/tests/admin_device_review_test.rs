@@ -436,3 +436,41 @@ async fn delete_disabled_device_succeeds() {
         "设备应被移除"
     );
 }
+
+/// I15：存量设备（deviceId 为空）删除——URL 传 name 作 did 时后端须能定位。
+/// 场景：前端 removeDevice 传 d.deviceId，空串会拼出残缺 URL 404；
+/// 兼容路径：did 按「先 device_id、后设备 name」匹配，空 deviceId 存量设备
+/// 以 name 作 did 删除成功。
+#[tokio::test]
+async fn delete_device_with_empty_device_id_falls_back_to_name() {
+    let sb = MockServer::start().await;
+    // test_user 的设备 device_id 为空串（存量形态）
+    let _shared = mount_stateful_sb(&sb, UsersFile { version: 2, users: vec![test_user()] }).await;
+    let base = spawn_app(&sb).await;
+    let cookie = admin_login(&base).await;
+
+    // 真实流程：先停用（enabled=false）才能删除
+    let put = reqwest::Client::new()
+        .put(format!("{base}/api/admin/users/100001"))
+        .header("cookie", &cookie)
+        .json(&serde_json::json!({"devices": [{
+            "deviceId": "",
+            "matchName": "macbook-pro",
+            "enabled": false,
+        }]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(put.status(), 200, "停用应成功（matchName 定位空 deviceId 设备）");
+
+    // did = 设备名（deviceId 为空的回退定位键）
+    let resp = delete_device(&base, &cookie, "100001", "macbook-pro").await;
+    assert_eq!(resp.status(), 200, "按 name 删除空 deviceId 设备应成功");
+
+    let users = admin_users(&base).await;
+    assert_eq!(
+        users["users"][0]["devices"].as_array().unwrap().len(),
+        0,
+        "设备应被移除"
+    );
+}

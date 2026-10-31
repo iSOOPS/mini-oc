@@ -20,6 +20,7 @@ import 'logbuf.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated_web.dart';
 
+import 'portkill.dart';
 import 'supervisor.dart';
 
 abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
@@ -63,6 +64,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PlatformInt64 dco_decode_box_autoadd_i_64(dynamic raw);
 
   @protected
+  PortOccupant dco_decode_box_autoadd_port_occupant(dynamic raw);
+
+  @protected
   StoredUser dco_decode_box_autoadd_stored_user(dynamic raw);
 
   @protected
@@ -102,10 +106,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PlatformInt64? dco_decode_opt_box_autoadd_i_64(dynamic raw);
 
   @protected
+  PortOccupant? dco_decode_opt_box_autoadd_port_occupant(dynamic raw);
+
+  @protected
   StoredUser? dco_decode_opt_box_autoadd_stored_user(dynamic raw);
 
   @protected
   int? dco_decode_opt_box_autoadd_u_32(dynamic raw);
+
+  @protected
+  PortOccupant dco_decode_port_occupant(dynamic raw);
 
   @protected
   ProjectSummary dco_decode_project_summary(dynamic raw);
@@ -174,6 +184,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PlatformInt64 sse_decode_box_autoadd_i_64(SseDeserializer deserializer);
 
   @protected
+  PortOccupant sse_decode_box_autoadd_port_occupant(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   StoredUser sse_decode_box_autoadd_stored_user(SseDeserializer deserializer);
 
   @protected
@@ -217,12 +232,20 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PlatformInt64? sse_decode_opt_box_autoadd_i_64(SseDeserializer deserializer);
 
   @protected
+  PortOccupant? sse_decode_opt_box_autoadd_port_occupant(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   StoredUser? sse_decode_opt_box_autoadd_stored_user(
     SseDeserializer deserializer,
   );
 
   @protected
   int? sse_decode_opt_box_autoadd_u_32(SseDeserializer deserializer);
+
+  @protected
+  PortOccupant sse_decode_port_occupant(SseDeserializer deserializer);
 
   @protected
   ProjectSummary sse_decode_project_summary(SseDeserializer deserializer);
@@ -300,6 +323,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_port_occupant(
+    PortOccupant self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_stored_user(
     StoredUser self,
     SseSerializer serializer,
@@ -357,6 +386,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_opt_box_autoadd_port_occupant(
+    PortOccupant? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_stored_user(
     StoredUser? self,
     SseSerializer serializer,
@@ -364,6 +399,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_opt_box_autoadd_u_32(int? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_port_occupant(PortOccupant self, SseSerializer serializer);
 
   @protected
   void sse_encode_project_summary(

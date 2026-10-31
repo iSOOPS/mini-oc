@@ -23,7 +23,7 @@ function dotClass(status?: DeviceStatus) {
 function statusText(status?: DeviceStatus) {
   if (status === 'online') return '在线'
   if (status === 'auth_mismatch') return '凭据不一致'
-  return '离线'
+  return '未启动服务'
 }
 </script>
 
@@ -54,7 +54,7 @@ function statusText(status?: DeviceStatus) {
       <p v-if="d.status === 'auth_mismatch'" class="hint warn">
         凭据不一致：用户密钥已重置，请在设备端重启云服务。
       </p>
-      <p v-if="d.status === 'offline'" class="hint">设备离线：请确认设备端 mini-oc 已启动服务。</p>
+      <p v-if="d.status === 'offline'" class="hint">未启动 opencode 服务：请在设备端 mini-oc 主页开启「启动云服务」（或「启动本地服务」）。</p>
     </div>
 
     <div v-if="!auth.loading && auth.devices.length === 0" class="card empty">

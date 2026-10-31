@@ -46,6 +46,8 @@ DeviceBrief _dev(String name) => DeviceBrief(
       bound: false,
       deviceName: '',
       publicUrl: 'https://oc.example.com',
+      deviceId: '',
+      enabled: true,
     );
 
 Widget app(_ScriptedAuth auth) {
@@ -81,8 +83,7 @@ void main() {
     await tester.pumpWidget(app(auth));
     await tester.pump(const Duration(milliseconds: 300));
 
-    await tester.enterText(find.byType(TextField).at(0), 'https://oc.example.com');
-    await tester.enterText(find.byType(TextField).at(1), 'somekey');
+    await tester.enterText(find.byType(TextField), 'somekey');
     await tester.tap(find.text('登录'));
     await tester.pump(const Duration(milliseconds: 300));
 
@@ -101,8 +102,7 @@ void main() {
     await tester.pumpWidget(app(auth));
     await tester.pump(const Duration(milliseconds: 300));
 
-    await tester.enterText(find.byType(TextField).at(0), 'https://oc.example.com');
-    await tester.enterText(find.byType(TextField).at(1), 'somekey');
+    await tester.enterText(find.byType(TextField), 'somekey');
     await tester.tap(find.text('登录'));
     await tester.pump(const Duration(milliseconds: 300));
 

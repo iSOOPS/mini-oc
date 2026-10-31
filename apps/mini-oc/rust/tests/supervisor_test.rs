@@ -59,7 +59,7 @@ async fn start_cloud_starts_both_processes() {
     let dir = tempfile::tempdir().unwrap();
     let toml_path = dir.path().join("global.toml");
     std::fs::write(&toml_path, "[client]\n").unwrap();
-    sup.start_cloud(port, &toml_path).await.unwrap();
+    sup.start_all(port, &toml_path).await.unwrap();
     let st = sup.state();
     assert_eq!(st.mode_str(), "cloud");
     assert!(st.serve_pid.is_some(), "serve 已启动");
@@ -111,9 +111,10 @@ async fn cloud_downgrade_stops_rathole_keeps_serve() {
     let dir = tempfile::tempdir().unwrap();
     let toml_path = dir.path().join("global.toml");
     std::fs::write(&toml_path, "[client]\n").unwrap();
-    sup.start_cloud(port, &toml_path).await.unwrap();
+    sup.start_all(port, &toml_path).await.unwrap();
 
-    sup.downgrade_to_local().await.unwrap();
+    // 降级 = 停隧道保 serve（I20 改名 downgrade_to_local → stop_tunnel）
+    sup.stop_tunnel().await.unwrap();
     let st = sup.state();
     assert_eq!(st.mode_str(), "local_only");
     assert!(st.serve_pid.is_some(), "serve 保留");
@@ -132,7 +133,7 @@ async fn stop_all_leaves_no_orphan() {
     let dir = tempfile::tempdir().unwrap();
     let toml_path = dir.path().join("global.toml");
     std::fs::write(&toml_path, "[client]\n").unwrap();
-    sup.start_cloud(port, &toml_path).await.unwrap();
+    sup.start_all(port, &toml_path).await.unwrap();
     let serve_pid = sup.state().serve_pid.unwrap();
     let rathole_pid = sup.state().rathole_pid.unwrap();
 
@@ -175,3 +176,134 @@ async fn start_local_probe_failure_stops_and_reports() {
 /// 辅助：确认 #[allow(dead_code)] 用到的 AtomicBool 不裁剪。
 #[allow(dead_code)]
 static _KEEP: AtomicBool = AtomicBool::new(false);
+
+#[tokio::test]
+async fn start_local_port_in_use_error_carries_prefix() {
+    let sup = test_supervisor();
+    let port = test_port(9);
+    // 占住端口（不释放）
+    let holder = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+
+    let err = sup.start_local(port).await.unwrap_err();
+    assert!(
+        err.starts_with(rust_lib_mini_oc::portkill::PORT_ERR_PREFIX),
+        "端口占用错误须带机器可读前缀，实际: {err}"
+    );
+
+    drop(holder);
+}
+
+// ---------------------------------------------------------------------------
+// I20：服务模式重构——TunnelOnly（仅隧道）+ 独立关闭语义
+// ---------------------------------------------------------------------------
+
+/// 仅启动隧道（TunnelOnly）：不启动 serve，只有 rathole。
+#[tokio::test]
+async fn start_tunnel_only_runs_rathole_without_serve() {
+    let sup = test_supervisor();
+    let port = test_port(10);
+    let dir = tempfile::tempdir().unwrap();
+    let toml_path = dir.path().join("global.toml");
+    std::fs::write(&toml_path, "[client]\n").unwrap();
+
+    sup.start_tunnel(&toml_path).await.unwrap();
+    let st = sup.state();
+    assert_eq!(st.mode_str(), "tunnel_only", "仅隧道模式");
+    assert!(st.rathole_pid.is_some(), "rathole 已启动");
+    assert!(st.serve_pid.is_none(), "serve 不启动");
+    sup.stop_all().await.unwrap();
+}
+
+/// 独立关闭：TunnelOnly 状态停 serve（无 serve）→ 仍是 TunnelOnly 不误伤隧道。
+/// （本测试验证 stop_serve 在 TunnelOnly 下无副作用）
+#[tokio::test]
+async fn stop_serve_in_tunnel_only_keeps_tunnel() {
+    let sup = test_supervisor();
+    let dir = tempfile::tempdir().unwrap();
+    let toml_path = dir.path().join("global.toml");
+    std::fs::write(&toml_path, "[client]\n").unwrap();
+
+    sup.start_tunnel(&toml_path).await.unwrap();
+    sup.stop_serve().await.unwrap();
+    let st = sup.state();
+    assert_eq!(st.mode_str(), "tunnel_only", "停 serve 不影响隧道");
+    assert!(st.rathole_pid.is_some());
+    sup.stop_all().await.unwrap();
+}
+
+/// 独立关闭：Cloud（隧道+本地）停隧道 → LocalOnly（serve 保留）。
+#[tokio::test]
+async fn stop_tunnel_in_cloud_downgrades_to_local_only() {
+    let sup = test_supervisor();
+    let port = test_port(11);
+    let dir = tempfile::tempdir().unwrap();
+    let toml_path = dir.path().join("global.toml");
+    std::fs::write(&toml_path, "[client]\n").unwrap();
+
+    sup.start_all(port, &toml_path).await.unwrap();
+    assert_eq!(sup.state().mode_str(), "cloud");
+
+    sup.stop_tunnel().await.unwrap();
+    let st = sup.state();
+    assert_eq!(st.mode_str(), "local_only", "停隧道保 serve");
+    assert!(st.serve_pid.is_some());
+    assert!(st.rathole_pid.is_none());
+    sup.stop_all().await.unwrap();
+}
+
+/// 独立关闭：Cloud 停 serve → TunnelOnly（rathole 保留）。
+#[tokio::test]
+async fn stop_serve_in_cloud_downgrades_to_tunnel_only() {
+    let sup = test_supervisor();
+    let port = test_port(12);
+    let dir = tempfile::tempdir().unwrap();
+    let toml_path = dir.path().join("global.toml");
+    std::fs::write(&toml_path, "[client]\n").unwrap();
+
+    sup.start_all(port, &toml_path).await.unwrap();
+    sup.stop_serve().await.unwrap();
+    let st = sup.state();
+    assert_eq!(st.mode_str(), "tunnel_only", "停 serve 保隧道");
+    assert!(st.rathole_pid.is_some());
+    assert!(st.serve_pid.is_none());
+    sup.stop_all().await.unwrap();
+}
+
+/// start_all（原 start_cloud 语义）：已在 LocalOnly 且端口一致 → 复用 serve 只补 rathole。
+#[tokio::test]
+async fn start_all_reuses_running_serve_on_same_port() {
+    let sup = test_supervisor();
+    let port = test_port(13);
+    sup.start_local(port).await.unwrap();
+    let pid_before = sup.state().serve_pid.unwrap();
+
+    let dir = tempfile::tempdir().unwrap();
+    let toml_path = dir.path().join("global.toml");
+    std::fs::write(&toml_path, "[client]\n").unwrap();
+
+    sup.start_all(port, &toml_path).await.unwrap();
+    let st = sup.state();
+    assert_eq!(st.mode_str(), "cloud");
+    assert_eq!(st.serve_pid, Some(pid_before), "同端口复用 serve 不重启");
+    sup.stop_all().await.unwrap();
+}
+
+/// TunnelOnly 状态下 start_all：补齐 serve（不清隧道）。
+#[tokio::test]
+async fn start_all_from_tunnel_only_adds_serve() {
+    let sup = test_supervisor();
+    let port = test_port(14);
+    let dir = tempfile::tempdir().unwrap();
+    let toml_path = dir.path().join("global.toml");
+    std::fs::write(&toml_path, "[client]\n").unwrap();
+
+    sup.start_tunnel(&toml_path).await.unwrap();
+    let rh_before = sup.state().rathole_pid.unwrap();
+
+    sup.start_all(port, &toml_path).await.unwrap();
+    let st = sup.state();
+    assert_eq!(st.mode_str(), "cloud");
+    assert_eq!(st.rathole_pid, Some(rh_before), "复用已有隧道不重启");
+    assert!(st.serve_pid.is_some(), "补齐 serve");
+    sup.stop_all().await.unwrap();
+}

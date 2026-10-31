@@ -28,9 +28,29 @@ fn user_info_response() -> serde_json::Value {
         "key": "k123456789012345678901234567890a",
         "devices": [
             {"desc": "d", "name": "macbook-pro", "port": 9464, "pctype": "macos",
-             "deviceName": "", "bound": false, "publicUrl": "https://oc.example.com"}
+             "deviceName": "", "bound": false, "publicUrl": "http://127.0.0.1:9469"}
         ]
     })
+}
+
+/// 回归（I 修复）：服务端下发 camelCase publicUrl，客户端 DeviceBrief 必须正确
+/// 反序列化。曾缺失 #[serde(rename = "publicUrl")] → 永远落 default 空串 →
+/// rathole_toml 校验「public_url 非法」→ 启动云服务必失败。
+#[tokio::test]
+async fn login_devices_carry_public_url() {
+    let (server, _guard) = setup().await;
+    Mock::given(method("POST"))
+        .and(path("/api/user/info"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(user_info_response()))
+        .mount(&server)
+        .await;
+
+    let info = login(&server.uri(), "k123456789012345678901234567890a").await.unwrap();
+    let dev = &info.devices[0];
+    assert_eq!(
+        dev.public_url, "http://127.0.0.1:9469",
+        "publicUrl 必须映射到 public_url（camelCase 契约），空串会导致云服务启动失败"
+    );
 }
 
 /// 串行 + 独立目录的测试环境。
@@ -181,4 +201,68 @@ fn logout_clears_user_keeps_server() {
     assert!(cfg.bound_device.is_none());
     assert_eq!(cfg.server_url, "https://oc.example.com", "服务器地址保留");
     assert_eq!(cfg.port, 9464, "端口偏好保留");
+}
+
+/// I14：V1 服务端响应（kebab-case 字段 + cloud_ip）→ 客户端必须给出
+/// 「服务器版本过旧」的明确错误，而非含糊的「响应解析失败」。
+/// 场景：生产 oc.isoops.com 仍是 V1，登录页默认地址连过去必失败。
+#[tokio::test]
+async fn login_v1_server_reports_clear_error() {
+    let (server, _guard) = setup().await;
+    // V1 真实响应形态（kebab-case device-name / public-url，含 cloud_ip）
+    let v1_body = serde_json::json!({
+        "id": "100001",
+        "name": "samuel",
+        "key": "k123456789012345678901234567890a",
+        "cloud_ip": "1.2.3.4",
+        "devices": [
+            {"desc": "d", "name": "macbook-pro", "port": 9464,
+             "device-name": "", "pctype": "macos", "bound": false,
+             "public-url": ""}
+        ]
+    });
+    Mock::given(method("POST"))
+        .and(path("/api/user/info"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(v1_body))
+        .mount(&server)
+        .await;
+
+    let err = login(&server.uri(), "k123456789012345678901234567890a")
+        .await
+        .unwrap_err();
+    assert!(
+        err.contains("服务器版本过旧"),
+        "V1 响应应提示版本问题，实际: {err}"
+    );
+}
+
+/// I16：login 不应无脑清空 bound_device——若清单仍含已绑定设备则保留。
+/// 场景：用户已绑定 macbook-pro，重新登录（未勾记住密码/重启后），弹层被取消
+/// → UI boundDevice 丢失 → 云服务开关永久置灰。绑定是持久事实，登录不该丢。
+#[tokio::test]
+async fn login_preserves_bound_device_still_in_list() {
+    let (server, _guard) = setup().await;
+    Mock::given(method("POST"))
+        .and(path("/api/user/info"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(user_info_response()))
+        .mount(&server)
+        .await;
+
+    // 预置已绑定状态（模拟此前会话的绑定结果）
+    let home = std::env::var("MINI_OC_HOME").unwrap();
+    let cfg_path = std::path::Path::new(&home).join("config.json");
+    let mut cfg = rust_lib_mini_oc::config::load_config();
+    cfg.bound_device = Some("macbook-pro".into());
+    rust_lib_mini_oc::config::save_config(&cfg).unwrap();
+
+    let info = login(&server.uri(), "k123456789012345678901234567890a").await.unwrap();
+    assert_eq!(info.devices.len(), 1);
+
+    let after = rust_lib_mini_oc::config::load_config();
+    assert_eq!(
+        after.bound_device.as_deref(),
+        Some("macbook-pro"),
+        "清单仍含该设备时登录不得清空绑定"
+    );
+    let _ = cfg_path;
 }

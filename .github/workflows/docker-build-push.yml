@@ -1,0 +1,133 @@
+name: Build and Push to Harbor
+
+on:
+  push:
+    branches:
+      - main
+      - feature/v2
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  REGISTRY: harbor.gxrs.net
+  IMAGE_NAME: library/mini-oc-web
+  # 基础镜像来源，对应 Dockerfile 的 ARG REGISTRY。
+  # 国内网络可改为镜像加速域名（如 docker.m.daocloud.io）。
+  BASE_REGISTRY: docker.io
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+
+    steps:
+      # 1. 拉取代码
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      # 2. 前置检查：Dockerfile 用 npm ci，缺少 lock 文件必然构建失败
+      - name: Check build prerequisites
+        run: |
+          set -euo pipefail
+          missing=0
+          for f in apps/mini-oc-web/Dockerfile apps/mini-oc-web/web/package-lock.json Cargo.toml Cargo.lock; do
+            if [ ! -f "$f" ]; then
+              echo "::error::缺少必需文件 ${f}"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "::error::构建前置条件不满足。请确认 apps/mini-oc-web/web/package-lock.json 已提交入库（npm ci 依赖它）。"
+            exit 1
+          fi
+          echo "前置检查通过。"
+
+      # 3. 登录 Harbor
+      - name: Login to Harbor
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.HARBOR_USERNAME }}
+          password: ${{ secrets.HARBOR_PASSWORD }}
+
+      # 4. 校验 Harbor 项目存在且允许推送（代理缓存项目禁止推送）
+      - name: Verify Harbor project is pushable
+        env:
+          HARBOR_USERNAME: ${{ secrets.HARBOR_USERNAME }}
+          HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+        run: |
+          set -euo pipefail
+          project="${IMAGE_NAME%%/*}"
+          api="https://${REGISTRY}/api/v2.0/projects/${project}"
+          status=$(curl -sS -o /tmp/harbor-project.json -w '%{http_code}' \
+            -u "${HARBOR_USERNAME}:${HARBOR_PASSWORD}" "${api}" || true)
+          if [ "${status}" = "404" ]; then
+            echo "::error::Harbor 项目 ${project} 不存在（${api} 返回 404）。请先在 Harbor 创建该项目，或修改 IMAGE_NAME。"
+            exit 1
+          fi
+          if [ "${status}" != "200" ]; then
+            echo "::warning::读取 Harbor 项目 ${project} 返回 HTTP ${status}，跳过校验，继续推送。"
+            exit 0
+          fi
+          registry_id=$(grep -o '"registry_id":[0-9]*' /tmp/harbor-project.json | head -1 | cut -d: -f2 || true)
+          if [ -n "${registry_id}" ] && [ "${registry_id}" != "0" ]; then
+            echo "::error::Harbor 项目 ${project} 是代理缓存项目（registry_id=${registry_id}），Harbor 禁止向代理缓存项目推送镜像。请改用普通项目。"
+            exit 1
+          fi
+          echo "Harbor 项目 ${project} 校验通过。"
+
+      # 5. 配置 Buildx（gha 缓存后端依赖 docker-container 驱动）
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # 6. 计算镜像标签
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            # 打 v* 标签时：v2.0.0 / 2.0.0 / 2.0，并附带 latest
+            type=semver,pattern={{raw}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            # 推送分支时：main / feature-v2；默认分支额外带 latest
+            type=ref,event=branch
+            type=raw,value=latest,enable={{is_default_branch}}
+            # 任意提交：完整 commit sha，便于按提交定位镜像
+            type=sha,format=long
+
+      # 7. 构建并推送
+      - name: Build and Push
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./apps/mini-oc-web/Dockerfile
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          build-args: |
+            REGISTRY=${{ env.BASE_REGISTRY }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=mini-oc-web
+          cache-to: type=gha,mode=max,scope=mini-oc-web,ignore-error=true
+
+      # 8. 汇报结果
+      - name: Summary
+        run: |
+          {
+            echo "### 镜像推送完成"
+            echo ""
+            echo "- 镜像：\`${REGISTRY}/${IMAGE_NAME}\`"
+            echo "- 标签：\`${{ steps.meta.outputs.tag-names }}\`"
+            echo "- Digest：\`${{ steps.build.outputs.digest }}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"

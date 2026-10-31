@@ -446,6 +446,10 @@ async fn admin_device_reject(
 }
 
 /// 移除单台设备：仅允许删除停用（enabled == false）的设备，启用中 → 409。
+///
+/// did 定位（I15）：优先按 device_id 精确匹配；**did 与某设备的 name 相同时
+/// 回退按 name 定位**——存量设备（deviceId 为空串）否则永远无法删除
+/// （前端传空 deviceId 会拼出残缺 URL 404，或按空串匹配不到任何设备）。
 async fn admin_device_delete(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -458,17 +462,19 @@ async fn admin_device_delete(
         .iter_mut()
         .find(|u| u.id == id)
         .ok_or_else(|| AppError::NotFound(format!("用户 {id} 不存在")))?;
-    let Some(dev) = slot.devices.iter().find(|d| d.device_id == did) else {
+    // 先 device_id 精确匹配；未命中且 did 恰为某设备 name → 按 name 定位
+    let dev_idx = slot
+        .devices
+        .iter()
+        .position(|d| !did.is_empty() && d.device_id == did)
+        .or_else(|| slot.devices.iter().position(|d| d.name == did));
+    let Some(dev_idx) = dev_idx else {
         return Err(AppError::NotFound(format!("设备 {did} 不存在")));
     };
-    if dev.enabled {
+    if slot.devices[dev_idx].enabled {
         return Err(AppError::Conflict("启用中的设备不可删除，请先停用".into()));
     }
-    let before = slot.devices.len();
-    slot.devices.retain(|d| d.device_id != did);
-    if slot.devices.len() == before {
-        return Err(AppError::NotFound(format!("设备 {did} 不存在")));
-    }
+    slot.devices.remove(dev_idx);
     slot.updated_at = Utc::now().to_rfc3339();
     state.sb.put_users(&file).await?;
     Ok(Json(serde_json::json!({"ok": true})))

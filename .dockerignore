@@ -1,0 +1,40 @@
+# ============================================================
+# 根目录 .dockerignore
+#
+# 作用：裁剪构建上下文。mini-oc-web 的构建上下文是仓库根
+# （Dockerfile 需要 COPY Cargo.toml / crates/ / apps/mini-oc-web/），
+# 因此这里排除与镜像无关、且体积巨大的目录。
+# 注意：Dockerfile 依赖以下路径，禁止排除：
+#   Cargo.toml、Cargo.lock、crates/、apps/mini-oc-web/{Cargo.toml,src/,web/}
+# ============================================================
+
+# Git 元数据
+.git
+.gitignore
+.github
+
+# Rust 构建产物（本地 target/ 可达数 GB）
+target
+**/target
+
+# Node 依赖与前端产物
+node_modules
+**/node_modules
+**/dist
+
+# Flutter 桌面客户端：mini-oc-web 镜像不需要
+apps/mini-oc
+
+# 本地配置与运行数据（含凭据，严禁进入构建上下文）
+.env
+.env.*
+!.env.example
+data
+**/data
+cookie_key
+**/cookie_key
+
+# 系统文件
+.DS_Store
+**/.DS_Store
+Thumbs.db

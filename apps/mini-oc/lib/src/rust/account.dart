@@ -40,8 +40,16 @@ class DeviceBrief {
   final bool bound;
   final String deviceName;
 
-  /// 隧道公网地址（rathole remote_addr 推导源）
+  /// 隧道公网地址（rathole remote_addr 推导源）。
+  /// 服务端 serde camelCase 下发为 publicUrl——缺失 rename 会静默落
+  /// default 空串，导致 rathole_toml 校验失败、云服务无法启动。
   final String publicUrl;
+
+  /// 设备唯一 ID（服务端下发；老版本服务端可能缺省 → 空串）
+  final String deviceId;
+
+  /// 启用状态（缺省 true，与 UserDevice::enabled 缺省语义一致）
+  final bool enabled;
 
   const DeviceBrief({
     required this.name,
@@ -50,6 +58,8 @@ class DeviceBrief {
     required this.bound,
     required this.deviceName,
     required this.publicUrl,
+    required this.deviceId,
+    required this.enabled,
   });
 
   @override
@@ -59,7 +69,9 @@ class DeviceBrief {
       pctype.hashCode ^
       bound.hashCode ^
       deviceName.hashCode ^
-      publicUrl.hashCode;
+      publicUrl.hashCode ^
+      deviceId.hashCode ^
+      enabled.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -71,5 +83,7 @@ class DeviceBrief {
           pctype == other.pctype &&
           bound == other.bound &&
           deviceName == other.deviceName &&
-          publicUrl == other.publicUrl;
+          publicUrl == other.publicUrl &&
+          deviceId == other.deviceId &&
+          enabled == other.enabled;
 }

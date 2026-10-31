@@ -20,6 +20,8 @@ fn device() -> DeviceBrief {
         bound: true,
         device_name: "X".into(),
         public_url: "https://oc.example.com".into(),
+        device_id: String::new(),
+        enabled: true,
     }
 }
 

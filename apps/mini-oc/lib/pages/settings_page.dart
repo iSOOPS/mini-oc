@@ -8,10 +8,10 @@ import '../src/rust/config.dart' show ClientConfig;
 ///
 /// ⚠️ 设备身份透传：deviceId / user / boundDevice 必须从 [current] 原样带入，
 /// 否则点一次「保存」就丢设备身份（builder check 高危项）。
+/// theme 透传 [ClientConfig.theme]（外观设置 UI 已移除，I19）。
 ClientConfig buildSavedConfig({
   required String serverText,
   required String portText,
-  required String theme,
   required ClientConfig current,
 }) {
   return ClientConfig(
@@ -21,7 +21,7 @@ ClientConfig buildSavedConfig({
     port: int.tryParse(portText.trim()) ?? current.port,
     opencodeBin: current.opencodeBin,
     deviceId: current.deviceId,
-    theme: theme,
+    theme: current.theme,
   );
 }
 
@@ -34,13 +34,36 @@ class SettingsPage extends ConsumerStatefulWidget {
 }
 
 class _SettingsPageState extends ConsumerState<SettingsPage> {
-  // 经 rustCfgProvider 读初始值（测试可注入；生产等价 rust.loadConfig()）
-  late final _server =
-      TextEditingController(text: ref.read(rustCfgProvider).serverUrl);
-  late final _port =
-      TextEditingController(text: ref.read(rustCfgProvider).port.toString());
-  String _theme = 'system';
+  // 表单控制器在 initState 由最新配置初始化（保存成功/Rust 侧写盘后重进页面
+  // 显示最新值；late final + provider 缓存会永远显示首次的旧值——I11）
+  late final TextEditingController _server;
+  late final TextEditingController _port;
+  // 进入页面时的服务器地址快照（保存时对比判定是否需提示重新登录，I19）
+  late final String _initialServer;
   bool _dirty = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // 强制重算（同 _save）：绕过 provider 缓存拿 config.json 最新值
+    final cfg = ref.refresh(rustCfgProvider);
+    _initialServer = cfg.serverUrl;
+    _server = TextEditingController(text: cfg.serverUrl);
+    _port = TextEditingController(text: cfg.port.toString());
+    // pending 态进页面 → 自动静默重报一次（重报幂等，是感知管理员批准的唯一途径；
+    // 批准后状态更新为已绑定并自动完成绑定，主页云服务开关随即可用）
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      // 进入设置页 → 从 web 端拉真实上报状态（I12：内存态 App 重启即丢，
+      // 不能让已上报设备显示「尚未上报」；只读无副作用）
+      ref.read(registrationProvider.notifier).restoreFromServer();
+      // pending 态 → 自动静默重报一次（重报幂等，是感知管理员批准的唯一途径；
+      // 批准后状态更新为已绑定并自动完成绑定，主页云服务开关随即可用）
+      final outcome = ref.read(registrationProvider);
+      if (outcome?.ok == true && outcome?.status == 'pending') {
+        ref.read(registrationProvider.notifier).report();
+      }
+    });
+  }
 
   @override
   void dispose() {
@@ -55,18 +78,25 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     // 测试 overrideWithValue / overrideWith 注入的值不受影响（Riverpod 对
     // override 的 provider 跳过重算，refresh 返回注入值本身）。
     final cfg = ref.refresh(rustCfgProvider);
+    final newServer = _server.text.trim();
     final newCfg = buildSavedConfig(
       serverText: _server.text,
       portText: _port.text,
-      theme: _theme,
       current: cfg,
     );
     try {
       await ref.read(saveConfigFnProvider)(cfg: newCfg);
+      // 保存成功 → invalidate 配置快照 provider（下次任何页面读取都拿最新值）
+      ref.invalidate(rustCfgProvider);
       if (mounted) {
         setState(() => _dirty = false);
-        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-            const SnackBar(content: Text('已保存（服务器地址修改需重新登录生效）')));
+        // 提示按实际改动区分（I19）：仅改端口等无需重启；服务器地址变更
+        // 才提示重新登录（旧提示对任何改动都带重启字样，误导）
+        final serverChanged = newServer != _initialServer;
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
+            content: Text(serverChanged
+                ? '已保存（服务器地址修改需重新登录生效）'
+                : '已保存 ✓')));
       }
     } catch (e) {
       if (mounted) {
@@ -90,12 +120,17 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       statusText = '上报失败：${outcome.error ?? '未知错误'}';
       statusColor = scheme.error;
     } else if (outcome.status == 'pending') {
-      // 定夺：不做轮询，重进设置页不重查；上报幂等，审核被拒可重报
-      statusText = '待审核';
+      // pending 时按钮保持可点：重报幂等且是感知管理员批准的唯一途径
+      // （批准后重报 → approved+enabled → 自动绑定）。禁用会造成死锁。
+      statusText = '待审核：管理员批准后点击「上报」刷新状态';
+      enabled = true;
+    } else if (outcome.status == 'approved' && outcome.enabled && outcome.bound) {
+      statusText = '已绑定：可在主页启动云服务';
       enabled = false;
-    } else if (outcome.status == 'approved' && outcome.enabled) {
-      statusText = '已上报';
-      enabled = false;
+    } else if (outcome.status == 'approved' && outcome.enabled && !outcome.bound) {
+      // 批准但自动绑定未成功（如清单暂未同步）→ 允许重新上报以重试绑定
+      statusText = '已批准，未绑定：点击「上报」重试';
+      statusColor = scheme.error;
     } else if (outcome.status == 'approved' && !outcome.enabled) {
       statusText = '已停用';
       statusColor = scheme.error;
@@ -141,23 +176,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             _field('opencode 端口（上报给服务端）', _port, hint: '9464'),
           ]),
           _section(context, '设备上报', [_buildReportSection()]),
-          _section(context, '外观', [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-              child: SegmentedButton<String>(
-                segments: const [
-                  ButtonSegment(value: 'system', label: Text('跟随系统')),
-                  ButtonSegment(value: 'light', label: Text('亮色')),
-                  ButtonSegment(value: 'dark', label: Text('暗色')),
-                ],
-                selected: {_theme},
-                onSelectionChanged: (s) => setState(() {
-                  _theme = s.first;
-                  _dirty = true;
-                }),
-              ),
-            ),
-          ]),
           const SizedBox(height: 8),
           FilledButton(
             onPressed: _dirty ? _save : null,

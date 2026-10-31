@@ -1,20 +1,22 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { api, type AdminDevice, type AdminUser, type PendingDevice } from '../api'
 
+const router = useRouter()
 const users = ref<AdminUser[]>([])
 const busy = ref(false)
 const error = ref('')
 
-// 新增/编辑表单
+// 新增用户表单
 const showForm = ref(false)
-const editingId = ref<string | null>(null)
 const formName = ref('')
 
-// 编辑态下的设备编辑草稿（拷贝自用户数据，保存时按白名单字段提交）。
+// 设备编辑态：仅一台设备的草稿（拷贝自列表），保存时按白名单字段单独提交，
+// 不影响其他设备（后端 devices 为逐条定位合并语义）。
 // matchName 记录打开编辑时的原始服务名：deviceId 为空的存量设备改名后，
 // 后端仍能按原名定位（name 已是新值，不能兼任定位键）。
-const editDevices = ref<(AdminDevice & { matchName: string })[]>([])
+const editingDevice = ref<{ userId: string; device: AdminDevice; matchName: string } | null>(null)
 
 // 待审核折叠区展开状态（key：用户 id）
 const expandedPending = ref<Record<string, boolean>>({})
@@ -43,46 +45,52 @@ async function load() {
 }
 
 function openCreate() {
-  editingId.value = null
   formName.value = ''
   showForm.value = true
 }
 
-function openEdit(u: AdminUser) {
-  editingId.value = u.id
-  formName.value = u.name
-  editDevices.value = u.devices.map((d) => ({ ...d, matchName: d.name }))
-  showForm.value = true
+// 打开单设备编辑：拷贝草稿，记录原始服务名作定位键
+function openDeviceEdit(u: AdminUser, d: AdminDevice) {
+  editingDevice.value = { userId: u.id, device: { ...d }, matchName: d.name }
 }
 
-async function saveForm() {
+function closeDeviceEdit() {
+  editingDevice.value = null
+}
+
+async function saveDeviceEdit() {
+  const ed = editingDevice.value
+  if (!ed) return
   error.value = ''
   try {
-    if (editingId.value) {
-      await api.adminUpdateUser(editingId.value, {
-        name: formName.value,
-        devices: editDevices.value.map((d) => ({
-          deviceId: d.deviceId,
-          matchName: d.matchName,
-          name: d.name,
-          publicUrl: d.publicUrl,
-          enabled: d.enabled,
-        })),
-      })
-    } else {
-      const r = await api.adminCreateUser({ name: formName.value })
-      keyPanel.value = { name: r.user.name, key: r.user.key }
-    }
-    showForm.value = false
+    await api.adminUpdateUser(ed.userId, {
+      devices: [
+        {
+          deviceId: ed.device.deviceId,
+          matchName: ed.matchName,
+          name: ed.device.name,
+          publicUrl: ed.device.publicUrl,
+          enabled: ed.device.enabled,
+        },
+      ],
+    })
+    editingDevice.value = null
     await load()
   } catch (e: any) {
     error.value = e?.message ?? '保存失败'
   }
 }
 
-// 编辑表单内的启用开关（仅改草稿，保存时统一提交）
-function toggleEditDevice(d: AdminDevice) {
-  d.enabled = !d.enabled
+async function saveForm() {
+  error.value = ''
+  try {
+    const r = await api.adminCreateUser({ name: formName.value })
+    keyPanel.value = { name: r.user.name, key: r.user.key }
+    showForm.value = false
+    await load()
+  } catch (e: any) {
+    error.value = e?.message ?? '保存失败'
+  }
 }
 
 // 请求体同时带 deviceId 与 name：deviceId 非空时后端按 id 定位；
@@ -108,7 +116,9 @@ async function removeDevice(u: AdminUser, d: AdminDevice) {
   if (!confirm(`移除设备 ${d.name}（${d.desc || d.deviceName}）？不可恢复。`)) return
   error.value = ''
   try {
-    await api.adminDeleteDevice(u.id, d.deviceId)
+    // 空 deviceId（存量设备）以 name 作 did：后端先按 device_id、未命中按
+    // name 回退定位；空串会拼出残缺 URL 必 404
+    await api.adminDeleteDevice(u.id, d.deviceId || d.name)
     await load()
   } catch (e: any) {
     error.value = e?.message ?? '移除失败'
@@ -170,6 +180,17 @@ async function remove(u: AdminUser) {
   await load()
 }
 
+// 退出管理会话：清 cookie（服务端 Max-Age=0）+ 本地标记 + 回登录页
+async function logout() {
+  try {
+    await api.adminLogout()
+  } catch {
+    /* 本地清理优先，网络失败不阻塞退出 */
+  }
+  sessionStorage.removeItem('mini_oc_admin')
+  router.push('/admin/login')
+}
+
 // 穿透地址输入预处理：剥协议/路径（V1 peelTunnelInput 行为）
 function peelStr(v: string): string {
   const raw = (v ?? '').trim()
@@ -198,6 +219,7 @@ function setApproveField(p: PendingDevice, field: 'name' | 'publicUrl', v: strin
       <div class="actions">
         <button class="btn ghost small" @click="load">↻ 刷新</button>
         <button class="btn small" @click="openCreate">＋ 新增用户</button>
+        <button class="btn ghost small" @click="logout">退出</button>
       </div>
     </header>
 
@@ -210,27 +232,9 @@ function setApproveField(p: PendingDevice, field: 'name' | 'publicUrl', v: strin
     <div v-if="error" class="card err">{{ error }}</div>
 
     <div v-if="showForm" class="card form">
-      <h3>{{ editingId ? '编辑用户' : '新增用户' }}</h3>
+      <h3>新增用户</h3>
       <label>用户名（字母数字 _ -）</label>
       <input v-model="formName" placeholder="如 samuel" />
-
-      <template v-if="editingId">
-        <h4>设备清单（只读项由客户端上报维护）</h4>
-        <div v-for="d in editDevices" :key="d.deviceId || d.name" class="device-row">
-          <div class="grid">
-            <div><label>描述（客户端上报）</label><input :value="d.desc" readonly /></div>
-            <div><label>服务名</label><input v-model="d.name" placeholder="macbook-pro" /></div>
-            <div><label>平台（客户端上报）</label><input :value="d.pctype" readonly /></div>
-            <div><label>端口（客户端上报）</label><input :value="d.port" readonly /></div>
-            <div><label>主机名（客户端上报）</label><input :value="d.deviceName" readonly /></div>
-            <div><label>绑定状态</label><input :value="d.bound ? '已绑定' : '未绑定'" readonly /></div>
-            <div class="wide"><label>穿透地址（自动剥协议）</label><input v-model="d.publicUrl" @blur="peel(d)" placeholder="oc.example.com 或 http://1.2.3.4:9101" /></div>
-          </div>
-          <div class="row-actions">
-            <button class="btn ghost small" @click="toggleEditDevice(d)">{{ d.enabled ? '停用' : '启用' }}</button>
-          </div>
-        </div>
-      </template>
 
       <div class="form-actions">
         <button class="btn ghost" @click="showForm = false">取消</button>
@@ -238,6 +242,58 @@ function setApproveField(p: PendingDevice, field: 'name' | 'publicUrl', v: strin
       </div>
     </div>
 
+    <!-- 单设备编辑：进入后隐藏用户/设备列表，仅编辑选中设备 -->
+    <div v-if="editingDevice" class="card form device-edit">
+      <header class="de-head">
+        <h3>编辑设备</h3>
+        <span v-if="!editingDevice.device.enabled" class="badge disabled">已停用</span>
+      </header>
+
+      <!-- 只读上报信息：客户端上报维护，不可修改 -->
+      <div class="ro-grid">
+        <div class="ro-item">
+          <span class="ro-label">描述</span>
+          <span class="ro-value">{{ editingDevice.device.desc || '—' }}</span>
+        </div>
+        <div class="ro-item">
+          <span class="ro-label">平台</span>
+          <span class="ro-value">{{ editingDevice.device.pctype }}</span>
+        </div>
+        <div class="ro-item">
+          <span class="ro-label">端口</span>
+          <span class="ro-value">{{ editingDevice.device.port }}</span>
+        </div>
+        <div class="ro-item">
+          <span class="ro-label">主机名</span>
+          <span class="ro-value">{{ editingDevice.device.deviceName || '—' }}</span>
+        </div>
+        <div class="ro-item">
+          <span class="ro-label">绑定状态</span>
+          <span class="ro-value" :class="{ ok: editingDevice.device.bound }">
+            {{ editingDevice.device.bound ? '已绑定' : '未绑定' }}
+          </span>
+        </div>
+      </div>
+
+      <!-- 可编辑字段 -->
+      <div class="edit-grid">
+        <div>
+          <label>服务名（rathole service 名）</label>
+          <input v-model="editingDevice.device.name" placeholder="macbook-pro" />
+        </div>
+        <div>
+          <label>穿透地址（自动剥协议）</label>
+          <input v-model="editingDevice.device.publicUrl" @blur="peel(editingDevice.device)" placeholder="oc.example.com 或 http://1.2.3.4:9101" />
+        </div>
+      </div>
+
+      <div class="form-actions">
+        <button class="btn ghost" @click="closeDeviceEdit">取消</button>
+        <button class="btn" :disabled="!editingDevice.device.name.trim() || !editingDevice.device.publicUrl.trim()" @click="saveDeviceEdit">保存</button>
+      </div>
+    </div>
+
+    <template v-if="!editingDevice && !showForm">
     <div class="card user" v-for="u in users" :key="u.id">
       <div class="uhead">
         <div>
@@ -245,7 +301,6 @@ function setApproveField(p: PendingDevice, field: 'name' | 'publicUrl', v: strin
           <span class="uid">#{{ u.id }}</span>
         </div>
         <div class="uactions">
-          <button class="btn ghost small" @click="openEdit(u)">编辑</button>
           <button class="btn ghost small" @click="regenerate(u)">重置密钥</button>
           <button class="btn danger small" @click="remove(u)">删除</button>
         </div>
@@ -263,6 +318,7 @@ function setApproveField(p: PendingDevice, field: 'name' | 'publicUrl', v: strin
             <span v-else-if="d.bound" class="badge bound">已绑定</span>
           </div>
           <div class="dactions">
+            <button class="btn ghost small" @click="openDeviceEdit(u, d)">编辑</button>
             <button class="btn ghost small" :disabled="toggling[`${u.id}:${d.deviceId || d.name}`]" @click="toggleEnabled(u.id, d)">{{ d.enabled ? '停用' : '启用' }}</button>
             <button v-if="!d.enabled" class="btn danger small" @click="removeDevice(u, d)">移除</button>
           </div>
@@ -304,7 +360,8 @@ function setApproveField(p: PendingDevice, field: 'name' | 'publicUrl', v: strin
       </div>
     </div>
 
-    <div v-if="!busy && users.length === 0" class="card empty">暂无用户</div>
+    <div v-if="!busy && users.length === 0 && !editingDevice && !showForm" class="card empty">暂无用户</div>
+    </template>
   </div>
 </template>
 
@@ -321,13 +378,18 @@ function setApproveField(p: PendingDevice, field: 'name' | 'publicUrl', v: strin
 .key { align-self: stretch; background: var(--surface-2); padding: 12px; border-radius: 10px; font-size: 15px; word-break: break-all; }
 .form { display: flex; flex-direction: column; gap: 10px; }
 .form h3 { font-size: 18px; }
-.form h4 { font-size: 15px; margin-top: 8px; }
 .form label { font-size: 13px; color: var(--text-2); display: block; margin-bottom: 4px; }
-.device-row { border-top: 1px dashed var(--surface-2); padding-top: 12px; display: flex; flex-direction: column; gap: 8px; }
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.grid .wide { grid-column: 1 / -1; }
-.row-actions { display: flex; gap: 8px; justify-content: flex-end; }
 .form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+
+/* 单设备编辑布局：只读上报信息块 + 可编辑字段 */
+.device-edit .de-head { display: flex; align-items: center; gap: 10px; }
+.ro-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; padding: 12px; background: var(--surface-2); border-radius: 10px; }
+.ro-item { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ro-label { font-size: 12px; color: var(--text-2); }
+.ro-value { font-size: 14px; font-weight: 500; word-break: break-all; }
+.ro-value.ok { color: var(--green); }
+.edit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .device-cards { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
 .device-card { border: 1px solid var(--surface-2); border-radius: 10px; padding: 10px 12px; display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
 .device-card .drow1 { display: flex; flex-direction: column; gap: 2px; min-width: 0; }

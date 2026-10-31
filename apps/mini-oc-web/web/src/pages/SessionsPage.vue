@@ -76,7 +76,7 @@ async function jump(s?: Session) {
     const win = window.open(info.url, '_blank', 'noopener')
     if (!win) jumpBlocked.value = true
   } catch (e: any) {
-    error.value = e?.message ?? '跳转失败（设备可能离线）'
+    error.value = e?.message ?? '跳转失败（设备端服务可能未启动）'
   }
 }
 </script>
@@ -89,7 +89,7 @@ async function jump(s?: Session) {
     </header>
 
     <div v-if="result?.source === 'snapshot'" class="banner">
-      快照数据 · 获取于 {{ result.fetchedAt ? new Date(result.fetchedAt).toLocaleString() : '未知时间' }} · 设备当前离线
+      快照数据 · 获取于 {{ result.fetchedAt ? new Date(result.fetchedAt).toLocaleString() : '未知时间' }} · 设备端服务未启动，展示最近快照
     </div>
 
     <div v-if="directory" class="dir">📂 {{ directory }}</div>

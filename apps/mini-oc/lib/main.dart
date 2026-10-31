@@ -5,6 +5,7 @@ import 'package:window_manager/window_manager.dart';
 
 import 'pages/home_page.dart';
 import 'pages/login_page.dart';
+import 'pages/login_server_page.dart';
 import 'pages/logs_page.dart';
 import 'pages/sessions_page.dart';
 import 'pages/settings_page.dart';
@@ -24,13 +25,15 @@ final routerProvider = Provider<GoRouter>((ref) {
     refreshListenable: auth,
     redirect: (context, state) {
       final loggedIn = auth.value;
-      final loggingIn = state.matchedLocation == '/login';
-      if (!loggedIn) return loggingIn ? null : '/login';
-      if (loggingIn) return '/home';
+      // 登录流程相关页面（/login 及子页如 /login/server）未登录也可访问
+      final inLoginFlow = state.matchedLocation.startsWith('/login');
+      if (!loggedIn) return inLoginFlow ? null : '/login';
+      if (inLoginFlow) return '/home';
       return null;
     },
     routes: [
       GoRoute(path: '/login', builder: (_, __) => const LoginPage()),
+      GoRoute(path: '/login/server', builder: (_, __) => const LoginServerPage()),
       ShellRoute(
         builder: (_, __, child) => AppShell(child: child),
         routes: [

@@ -36,6 +36,9 @@ pub struct SupConfig {
 pub enum ServiceMode {
     Off,
     LocalOnly,
+    /// 仅隧道（rathole），无 serve（I20）
+    TunnelOnly,
+    /// serve + rathole 全开（原 Cloud 语义，start_all 目标态）
     Cloud,
 }
 
@@ -44,6 +47,7 @@ impl ServiceMode {
         match self {
             ServiceMode::Off => "off",
             ServiceMode::LocalOnly => "local_only",
+            ServiceMode::TunnelOnly => "tunnel_only",
             ServiceMode::Cloud => "cloud",
         }
     }
@@ -128,16 +132,28 @@ impl Supervisor {
     }
 
     /// 端口占用检测。
+    ///
+    /// 错误信息带 [`crate::portkill::PORT_ERR_PREFIX`] 前缀（机器可读），
+    /// Dart 侧据此识别弹「杀死占用进程」对话框（I10）。
     fn ensure_port_free(port: u16) -> Result<(), String> {
         match std::net::TcpListener::bind(("127.0.0.1", port)) {
             Ok(_) => Ok(()),
-            Err(_) => Err(format!("端口 {port} 已被占用。可在设置中更换端口，或使用「强制清理」结束占用进程")),
+            Err(_) => Err(format!(
+                "{PREFIX}{port} 已被占用（可在设置中更换端口，或结束占用进程后重试）",
+                PREFIX = crate::portkill::PORT_ERR_PREFIX
+            )),
         }
     }
 
     /// 启动本地服务：spawn serve（stdout/stderr 管道接入日志）→ 探针存活（10s）→ LocalOnly。
+    /// 启动本地服务（全停后重启 serve；独立入口语义 = 用户显式点本地开关）。
     pub async fn start_local(&self, port: u16) -> Result<(), String> {
         self.stop_all().await?;
+        self.spawn_serve(port).await
+    }
+
+    /// spawn serve 并等待就绪（不触碰 rathole；start_local / start_all 共用）。
+    async fn spawn_serve(&self, port: u16) -> Result<(), String> {
         Self::ensure_port_free(port)?;
         let mut cmd = (self.cmd.serve_command)(port);
         #[cfg(target_os = "windows")]
@@ -190,15 +206,10 @@ impl Supervisor {
     }
 
     /// 启动云服务：serve（可复用）+ rathole → Cloud。
-    pub async fn start_cloud(&self, port: u16, rathole_toml_path: &Path) -> Result<(), String> {
-        // 端口不一致时以清单端口重启 serve（spec §5.2.1）
-        let need_restart = {
-            let inner = self.inner.lock().unwrap();
-            inner.mode == ServiceMode::Off || inner.port != port
-        };
-        if need_restart {
-            self.start_local(port).await?;
-        }
+    /// 启动隧道部分（spawn rathole → 存活检查）。
+    ///
+    /// 不触碰 serve——调用方（start_all / start_tunnel）决定 serve 策略。
+    async fn start_rathole(&self, rathole_toml_path: &Path) -> Result<(), String> {
         let mut cmd = (self.cmd.rathole_command)(rathole_toml_path);
         #[cfg(target_os = "windows")]
         {
@@ -214,7 +225,6 @@ impl Supervisor {
         {
             let mut inner = self.inner.lock().unwrap();
             inner.rathole = Some(child);
-            inner.mode = ServiceMode::Cloud;
             let st = inner.snapshot();
             drop(inner);
             self.emit(st);
@@ -230,8 +240,12 @@ impl Supervisor {
                 .unwrap_or(false);
             if !alive {
                 inner.rathole = None;
-                inner.mode = ServiceMode::LocalOnly; // serve 仍在
+                // 模式回退：按 serve 是否仍在收敛（serve 在 → LocalOnly，否则 Off）
+                inner.mode = if inner.serve.is_some() { ServiceMode::LocalOnly } else { ServiceMode::Off };
                 inner.last_error = Some("rathole 启动后立即退出（检查网络与 token）".into());
+                let st = inner.snapshot();
+                drop(inner);
+                self.emit(st);
                 false
             } else {
                 true
@@ -243,14 +257,60 @@ impl Supervisor {
         Ok(())
     }
 
-    /// 降级：Cloud → LocalOnly。
-    pub async fn downgrade_to_local(&self) -> Result<(), String> {
-        self.kill_rathole().await?;
+    /// 刷新模式（按 serve/rathole 实际存在收敛）。
+    fn refresh_mode(&self) {
         let mut inner = self.inner.lock().unwrap();
-        inner.mode = if inner.serve.is_some() { ServiceMode::LocalOnly } else { ServiceMode::Off };
+        inner.mode = match (inner.serve.is_some(), inner.rathole.is_some()) {
+            (true, true) => ServiceMode::Cloud,
+            (true, false) => ServiceMode::LocalOnly,
+            (false, true) => ServiceMode::TunnelOnly,
+            (false, false) => ServiceMode::Off,
+        };
         let st = inner.snapshot();
         drop(inner);
         self.emit(st);
+    }
+
+    /// 仅启动隧道（I20）：只起 rathole，不启动 serve。
+    pub async fn start_tunnel(&self, rathole_toml_path: &Path) -> Result<(), String> {
+        self.start_rathole(rathole_toml_path).await?;
+        self.refresh_mode();
+        Ok(())
+    }
+
+    /// 启动全部（原 start_cloud 语义，I20 更名）：隧道 + 本地服务。
+    ///
+    /// serve 策略：未跑或端口不一致 → 先停旧 serve 再以清单端口重启；
+    /// 同端口已跑 → 复用。隧道策略：未跑 → 启动；已跑 → 复用（不清旧隧道）。
+    pub async fn start_all(&self, port: u16, rathole_toml_path: &Path) -> Result<(), String> {
+        let need_restart = {
+            let inner = self.inner.lock().unwrap();
+            inner.serve.is_none() || inner.port != port
+        };
+        if need_restart {
+            // 只停 serve 不动隧道（TunnelOnly → start_all 复用已有 rathole，I20）
+            self.kill_serve().await?;
+            self.spawn_serve(port).await?;
+        }
+        let tunnel_running = { self.inner.lock().unwrap().rathole.is_some() };
+        if !tunnel_running {
+            self.start_rathole(rathole_toml_path).await?;
+        }
+        self.refresh_mode();
+        Ok(())
+    }
+
+    /// 停止隧道（保留 serve）：Cloud → LocalOnly；TunnelOnly → Off。
+    pub async fn stop_tunnel(&self) -> Result<(), String> {
+        self.kill_rathole().await?;
+        self.refresh_mode();
+        Ok(())
+    }
+
+    /// 停止本地 serve（保留隧道）：Cloud → TunnelOnly；LocalOnly → Off（I20）。
+    pub async fn stop_serve(&self) -> Result<(), String> {
+        self.kill_serve().await?;
+        self.refresh_mode();
         Ok(())
     }
 
@@ -301,6 +361,18 @@ impl Supervisor {
             match inner.mode {
                 ServiceMode::Off => {}
                 ServiceMode::LocalOnly if serve_alive => {}
+                ServiceMode::TunnelOnly if rathole_alive => {}
+                // TunnelOnly 下 rathole 崩溃 → Off（serve 本就不在）
+                ServiceMode::TunnelOnly if !rathole_alive => {
+                    inner.rathole = None;
+                    inner.mode = ServiceMode::Off;
+                    inner.last_error = Some("rathole 意外退出".into());
+                    let st = inner.snapshot();
+                    drop(inner);
+                    self.emit(st);
+                    tracing::warn!("rathole 崩溃（tunnel_only）");
+                    continue;
+                }
                 ServiceMode::Cloud if serve_alive && rathole_alive => {}
                 ServiceMode::Cloud if serve_alive && !rathole_alive => {
                     inner.rathole = None;

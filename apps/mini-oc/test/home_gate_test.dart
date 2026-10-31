@@ -34,7 +34,7 @@ Widget wrap({required Stream<ServiceState> states, required AuthState auth}) {
 }
 
 void main() {
-  testWidgets('未绑定设备时云服务开关置灰并显示引导', (tester) async {
+  testWidgets('未绑定设备时隧道开关置灰并显示引导', (tester) async {
     await tester.pumpWidget(wrap(
       states: Stream.value(_st(ServiceMode.off)),
       auth: const AuthState(userId: '100001', userName: 'samuel'), // boundDevice = null
@@ -42,12 +42,12 @@ void main() {
     await tester.pumpAndSettle();
 
     // 云开关 tile 存在但 Switch 禁用（onChanged null）
-    final tile = find.widgetWithText(ListTile, '启动云服务');
+    final tile = find.widgetWithText(ListTile, '启动隧道');
     expect(tile, findsOneWidget);
     final switchWidget = tester.widget<Switch>(
       find.descendant(of: tile, matching: find.byType(Switch)),
     );
-    expect(switchWidget.onChanged, isNull, reason: '未绑定时云服务 Switch 禁用');
+    expect(switchWidget.onChanged, isNull, reason: '未绑定时隧道 Switch 禁用');
 
     // 本地服务开关不受影响（可切换）
     final localTile = find.widgetWithText(ListTile, '启动本地服务');
@@ -76,13 +76,13 @@ void main() {
     await ctrl.close();
   });
 
-  testWidgets('云服务运行中显示 cloud 状态与 PID', (tester) async {
+  testWidgets('全部运行中显示状态与 PID', (tester) async {
     await tester.pumpWidget(wrap(
       states: Stream.value(_st(ServiceMode.cloud)),
       auth: const AuthState(userId: '100001', userName: 'samuel', boundDevice: 'macbook-pro'),
     ));
     await tester.pumpAndSettle();
-    expect(find.text('云服务运行中'), findsOneWidget);
+    expect(find.text('全部服务运行中'), findsOneWidget);
     expect(find.textContaining('PID'), findsOneWidget);
   });
 }

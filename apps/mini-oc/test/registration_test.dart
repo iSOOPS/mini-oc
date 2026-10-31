@@ -36,11 +36,12 @@ class _FixedAuth extends AuthNotifier {
   AuthState build() => initial;
 }
 
-ReportOutcome _ok(String status, bool enabled) => ReportOutcome(
+ReportOutcome _ok(String status, bool enabled, {bool bound = false}) => ReportOutcome(
       ok: true,
       status: status,
       deviceId: 'd-123',
       enabled: enabled,
+      bound: bound,
       error: null,
     );
 
@@ -79,20 +80,31 @@ void main() {
     expect(reportBtn(tester).onPressed, isNotNull, reason: '初始未上报，按钮可点');
   });
 
-  testWidgets('approved&&enabled → 按钮禁用，显示「已上报」', (tester) async {
-    await tester.pumpWidget(wrap(initial: _ok('approved', true), cfg: cfgWithDevice));
+  testWidgets('approved&&enabled&&bound → 按钮禁用，显示「已绑定」', (tester) async {
+    await tester.pumpWidget(
+        wrap(initial: _ok('approved', true, bound: true), cfg: cfgWithDevice));
     await tester.pumpAndSettle();
 
-    expect(reportBtn(tester).onPressed, isNull, reason: '已上报且启用，按钮禁用');
-    expect(find.text('已上报'), findsOneWidget);
+    expect(reportBtn(tester).onPressed, isNull, reason: '已绑定，按钮禁用');
+    expect(find.textContaining('已绑定'), findsOneWidget);
   });
 
-  testWidgets('pending → 按钮禁用，显示「待审核」', (tester) async {
+  testWidgets('approved&&enabled&&!bound → 按钮可点（重试绑定），提示未绑定', (tester) async {
+    await tester.pumpWidget(
+        wrap(initial: _ok('approved', true, bound: false), cfg: cfgWithDevice));
+    await tester.pumpAndSettle();
+
+    expect(reportBtn(tester).onPressed, isNotNull, reason: '绑定未完成，可重新上报重试');
+    expect(find.textContaining('未绑定'), findsOneWidget);
+  });
+
+  testWidgets('pending → 显示「待审核」且按钮可点（重报是唯一状态查询途径）', (tester) async {
     await tester.pumpWidget(wrap(initial: _ok('pending', false), cfg: cfgWithDevice));
     await tester.pumpAndSettle();
 
-    expect(reportBtn(tester).onPressed, isNull, reason: '待审核，按钮禁用');
-    expect(find.text('待审核'), findsOneWidget);
+    expect(find.textContaining('待审核'), findsOneWidget);
+    expect(reportBtn(tester).onPressed, isNotNull,
+        reason: 'pending 态按钮必须可点：管理员批准后靠重报感知，禁用即死锁');
   });
 
   testWidgets('approved&&!enabled → 显示「已停用」，按钮保持可点', (tester) async {
@@ -105,7 +117,7 @@ void main() {
 
   testWidgets('上报失败（ok=false）→ 显示错误文本，按钮可点', (tester) async {
     const failed = ReportOutcome(
-      ok: false, status: '', deviceId: '', enabled: false, error: '网络错误');
+      ok: false, status: '', deviceId: '', enabled: false, bound: false, error: '网络错误');
     await tester.pumpWidget(wrap(initial: failed, cfg: cfgWithDevice));
     await tester.pumpAndSettle();
 
@@ -121,12 +133,10 @@ void main() {
     final saved = buildSavedConfig(
       serverText: 'https://oc.example.com',
       portText: '9464',
-      theme: 'dark',
       current: cfgWithDevice,
     );
     expect(saved.deviceId, 'd-123', reason: '保存后 deviceId 不丢');
     expect(saved.serverUrl, 'https://oc.example.com');
-    expect(saved.theme, 'dark');
   });
 
   testWidgets('回归：上报后 config 已变（缓存未刷）→ 保存透传新 deviceId', (tester) async {
@@ -212,6 +222,48 @@ void main() {
     await notifier.report();
     expect(calls, [1], reason: 'report 调用注入 fn');
     expect(container.read(registrationProvider)?.status, 'approved');
+  });
+
+  test('provider 层：自动绑定成功 → AuthState.boundDevice 同步刷新（主页开关恢复）', () async {
+    final container = ProviderContainer(overrides: [
+      reportRegistrationFnProvider.overrideWithValue(() async =>
+          _ok('approved', true, bound: true)),
+      rustCfgProvider.overrideWith((ref) => const ClientConfig(
+            serverUrl: 'https://oc.example.com',
+            port: 9464,
+            theme: 'system',
+            boundDevice: 'office-mac', // auto_bind 已写盘，loadConfig 读到
+          )),
+    ]);
+    addTearDown(container.dispose);
+
+    // 模拟登录后未绑定（弹层未选/auto_bind 未跑）的内存态
+    final auth = container.read(authProvider.notifier);
+    auth.state = const AuthState(userId: '100001', userName: 'samuel');
+    expect(container.read(authProvider).boundDevice, isNull);
+
+    await container.read(registrationProvider.notifier).report();
+
+    expect(container.read(authProvider).boundDevice, 'office-mac',
+        reason: '绑定成功必须刷新登录态内存，否则主页云服务开关置灰需重启');
+  });
+
+  test('provider 层：绑定未成功（bound=false）→ 不动 AuthState', () async {
+    final container = ProviderContainer(overrides: [
+      reportRegistrationFnProvider.overrideWithValue(
+          () async => _ok('pending', false, bound: false)),
+      rustCfgProvider.overrideWith((ref) => const ClientConfig(
+            serverUrl: 'https://oc.example.com', port: 9464, theme: 'system',
+          )),
+    ]);
+    addTearDown(container.dispose);
+
+    final auth = container.read(authProvider.notifier);
+    auth.state = const AuthState(userId: '100001', userName: 'samuel');
+
+    await container.read(registrationProvider.notifier).report();
+    expect(container.read(authProvider).boundDevice, isNull,
+        reason: '未绑定成功不碰登录态');
   });
 
   test('provider 层：fn 抛异常时兜底 ok=false 不崩溃', () async {

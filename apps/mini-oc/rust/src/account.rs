@@ -14,9 +14,21 @@ pub struct DeviceBrief {
     pub bound: bool,
     #[serde(rename = "deviceName")]
     pub device_name: String,
-    /// 隧道公网地址（rathole remote_addr 推导源）
-    #[serde(default)]
+    /// 隧道公网地址（rathole remote_addr 推导源）。
+    /// 服务端 serde camelCase 下发为 publicUrl——缺失 rename 会静默落
+    /// default 空串，导致 rathole_toml 校验失败、云服务无法启动。
+    #[serde(rename = "publicUrl", default)]
     pub public_url: String,
+    /// 设备唯一 ID（服务端下发；老版本服务端可能缺省 → 空串）
+    #[serde(rename = "deviceId", default)]
+    pub device_id: String,
+    /// 启用状态（缺省 true，与 UserDevice::enabled 缺省语义一致）
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// 登录后返回的账户信息。
@@ -62,10 +74,23 @@ pub async fn login(server_url: &str, key: &str) -> Result<AccountInfo, String> {
         tracing::warn!("登录失败 HTTP {status}: {msg}");
         return Err(format!("登录失败（HTTP {status}）：{msg}"));
     }
-    let info: AccountInfo = resp
-        .json()
+    let body_text = resp
+        .text()
         .await
-        .map_err(|e| format!("响应解析失败: {e}"))?;
+        .map_err(|e| format!("响应读取失败: {e}"))?;
+    let info: AccountInfo = serde_json::from_str(&body_text).map_err(|e| {
+        // V1 服务器探测（I14）：解析失败 + 响应含 V1 特征字段（cloud_ip /
+        // device-name kebab-case）→ 明确提示版本过旧，而非含糊的解析失败。
+        // （生产 oc.isoops.com 曾仍是 V1，报错无从下手）
+        let is_v1 = body_text.contains("cloud_ip")
+            || body_text.contains("device-name")
+            || body_text.contains("public-url");
+        if is_v1 {
+            "服务器版本过旧：该地址运行的是 V1 mini-oc-web（响应格式不兼容），请升级服务端或改连 V2 服务器".to_string()
+        } else {
+            format!("响应解析失败: {e}")
+        }
+    })?;
 
     // 持久化（保留端口偏好等本地设置）
     let mut cfg = load_config();
@@ -75,10 +100,20 @@ pub async fn login(server_url: &str, key: &str) -> Result<AccountInfo, String> {
         name: info.name.clone(),
         key: key.to_string(),
     });
-    cfg.bound_device = None; // 新登录重置绑定
+    // 绑定保留（I16）：清单仍含已绑定设备时不清空——绑定是持久事实，
+    // 重登录（弹层取消/未重选）不该把云服务开关永久置灰。
+    // 清单已不含（服务端删除/换号）→ 才重置。
+    if let Some(bound) = cfg.bound_device.clone() {
+        if !info.devices.iter().any(|d| d.name == bound) {
+            cfg.bound_device = None;
+        }
+    } else {
+        cfg.bound_device = None;
+    }
     save_config(&cfg)?;
     // 显式登录成功 → 后台静默上报设备（失败不影响登录结果）
-    tokio::spawn(async move {
+    // （I9：统一走共享 runtime，不依赖调用方线程的 tokio 上下文）
+    crate::runtime::spawn_on_runtime(async move {
         let out = crate::api::report_registration().await;
         if !out.ok {
             tracing::warn!("登录后设备上报未成功（不影响登录）: {:?}", out.error);

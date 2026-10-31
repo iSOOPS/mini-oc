@@ -188,6 +188,37 @@ async fn pair_extracts_code() {
 }
 
 #[tokio::test]
+async fn connect_exchanges_code_for_token() {
+    // GET /auth/connect/{code} → {token}（公开端点，无需 basic auth；实测 curl 无 -u 亦成功）
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/auth/connect/610bsBT_9EqdC"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            serde_json::json!({"token": "1796025749.EKzkuAmKP9wfB4QAWNYZNKlPddvzWv9ruxIYnWJ4ZHg"}),
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let token = client_for(&server).connect("610bsBT_9EqdC").await.unwrap();
+    assert_eq!(token, "1796025749.EKzkuAmKP9wfB4QAWNYZNKlPddvzWv9ruxIYnWJ4ZHg");
+}
+
+#[tokio::test]
+async fn connect_invalid_code_maps_unauthorized() {
+    // code 一次性：复用/伪造 → 401
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/auth/connect/bad"))
+        .respond_with(ResponseTemplate::new(401).set_body_json(
+            serde_json::json!({"_tag": "UnauthorizedError", "message": "Authentication required"}),
+        ))
+        .mount(&server)
+        .await;
+    let err = client_for(&server).connect("bad").await.unwrap_err();
+    assert!(matches!(err, OcError::Unauthorized(401)), "got {err:?}");
+}
+
+#[tokio::test]
 async fn requests_carry_basic_auth_header() {
     let server = MockServer::start().await;
     // base64("opencode:testkey1234567890abcdefghij12345")

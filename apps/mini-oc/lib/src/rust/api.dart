@@ -11,9 +11,10 @@ import 'logbuf.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
+import 'portkill.dart';
 import 'supervisor.dart';
 
-// These functions are ignored because they are not marked as `pub`: `bound_device_brief`, `current_key`, `effective_port`, `global_supervisor`, `rathole_settings_dir`, `real_probe`, `real_rathole_command`, `real_serve_command`, `report_port`, `require_serve`
+// These functions are ignored because they are not marked as `pub`: `auto_bind_approved_device`, `bound_device_brief`, `current_key`, `effective_port`, `fetch_devices`, `global_supervisor`, `prepare_rathole`, `rathole_settings_dir`, `real_probe`, `real_rathole_command`, `real_serve_command`, `report_port`, `require_serve`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`
 
 /// 登录（见 account::login）。
@@ -55,6 +56,17 @@ Future<void> saveConfig({required ClientConfig cfg}) =>
 /// 桥接链路自检（同步）。
 String ping() => RustLib.instance.api.crateApiPing();
 
+/// 端口占用错误前缀（Dart 侧判定弹框用；与 Rust 常量同值，frb 不透传 const）。
+String portErrPrefix() => RustLib.instance.api.crateApiPortErrPrefix();
+
+/// 查询端口占用进程（无占用返回 null）。
+PortOccupant? queryPortOccupant({required int port}) =>
+    RustLib.instance.api.crateApiQueryPortOccupant(port: port);
+
+/// 杀掉端口占用者并等待端口释放（详见 portkill 模块文档）。
+Future<void> killPortOccupant({required int port}) =>
+    RustLib.instance.api.crateApiKillPortOccupant(port: port);
+
 /// opencode 二进制定位：OPENCODE_BIN env → config.opencode_bin → PATH。
 Future<String> resolveOpencodeBin() =>
     RustLib.instance.api.crateApiResolveOpencodeBin();
@@ -63,15 +75,39 @@ Future<String> resolveOpencodeBin() =>
 ///
 /// - 地址取 `server_url_effective()`（env 优先，比读 config 更稳）
 /// - 响应 deviceId 与 config 不同 → 原子写回 config.json
+/// - approved + enabled → 自动绑定：拉清单找到本机设备 → device-bind →
+///   本地 bound_device 写盘（管理员批准即信任，免去重新登录选择）
 /// - 永不 panic：所有错误装进 `ReportOutcome.error`，调用方静默降级
 Future<ReportOutcome> reportRegistration() =>
     RustLib.instance.api.crateApiReportRegistration();
 
+/// 只读上报状态查询（I12：设置页进入时调用，无副作用）。
+///
+/// 与 [`report_registration`] 的区别：不 POST device-register、不写 config、
+/// 不触发自动绑定——仅拉清单判断本机设备当前状态，供 UI 恢复真实上报态
+/// （App 重启后内存态丢失，不能显示「尚未上报」）。
+///
+/// 匹配顺序：config.device_id → 本机 device_name+pctype。
+/// 清单未命中 → status="pending"（服务端不下发 pending 明细，无法区分
+/// 「待审核」与「未上报」）；网络失败 → ok=false。
+Future<ReportOutcome> queryRegistration() =>
+    RustLib.instance.api.crateApiQueryRegistration();
+
 /// 启动本地服务。
 Future<void> startLocal() => RustLib.instance.api.crateApiStartLocal();
 
-/// 启动云服务（需已登录并绑定设备；端口以清单为准）。
-Future<void> startCloud() => RustLib.instance.api.crateApiStartCloud();
+/// 停止本地服务（保留隧道）：LocalOnly → Off；Cloud → TunnelOnly（I20）。
+Future<void> stopLocal() => RustLib.instance.api.crateApiStopLocal();
+
+/// 仅启动隧道（I20）：只起 rathole，不启动 serve（需已登录并绑定设备）。
+Future<void> startTunnel() => RustLib.instance.api.crateApiStartTunnel();
+
+/// 停止隧道（保留本地服务）：Cloud → LocalOnly；TunnelOnly → Off（I20）。
+Future<void> stopTunnel() => RustLib.instance.api.crateApiStopTunnel();
+
+/// 启动全部（I20，原「云服务」语义）：隧道 + 本地服务（端口以清单为准，
+/// 同端口 serve 复用；已跑隧道复用）。
+Future<void> startAll() => RustLib.instance.api.crateApiStartAll();
 
 /// 停止全部服务。
 Future<void> stopAll() => RustLib.instance.api.crateApiStopAll();
@@ -113,9 +149,14 @@ Future<void> openInTerminal({required String directory, String? sessionId}) =>
     );
 
 /// 日志订阅（frb StreamSink 标准流模式）。
+///
+/// 本函数以 wrap_normal 模式在 frb 线程池的普通线程上执行（无 tokio 上下文），
+/// 桥接循环必须走共享 runtime（I9）。
 Stream<LogLine> subscribeLogs() => RustLib.instance.api.crateApiSubscribeLogs();
 
 /// 服务状态流订阅（UI 监听模式切换/崩溃）。
+///
+/// 同上：wrap_normal 模式 + 共享 runtime（I9）。
 Stream<ServiceState> subscribeState() =>
     RustLib.instance.api.crateApiSubscribeState();
 
@@ -158,6 +199,9 @@ class ReportOutcome {
   /// 服务端确认的设备 ID；失败为空串
   final String deviceId;
   final bool enabled;
+
+  /// 批准设备是否已自动完成绑定（approved + enabled + 绑定请求成功）
+  final bool bound;
   final String? error;
 
   const ReportOutcome({
@@ -165,6 +209,7 @@ class ReportOutcome {
     required this.status,
     required this.deviceId,
     required this.enabled,
+    required this.bound,
     this.error,
   });
 
@@ -174,6 +219,7 @@ class ReportOutcome {
       status.hashCode ^
       deviceId.hashCode ^
       enabled.hashCode ^
+      bound.hashCode ^
       error.hashCode;
 
   @override
@@ -185,6 +231,7 @@ class ReportOutcome {
           status == other.status &&
           deviceId == other.deviceId &&
           enabled == other.enabled &&
+          bound == other.bound &&
           error == other.error;
 }
 

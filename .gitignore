@@ -1,23 +1,103 @@
-# Rust
+# ============================================================
+# mini-oc 仓库根 .gitignore
+#
+# 分工原则：根 .gitignore 只管「跨项目通用」与「仓库根专属」产物；
+# 子工程各自的 .gitignore（apps/mini-oc/.gitignore、
+# apps/mini-oc/rust/.gitignore、apps/mini-oc/macos/.gitignore 等）
+# 继续负责各自生态的细节，此处不重复罗列。
+# ============================================================
+
+# ------------------------------------------------------------
+# Rust 产物
+# ------------------------------------------------------------
+# 根 workspace（crates/ + apps/mini-oc-web/）的构建产物。
+# 注意：apps/mini-oc/rust/ 是被 workspace exclude 的独立 crate，
+# 它的 target/ 由 apps/mini-oc/rust/.gitignore 管理，此处不覆盖。
 /target/
 **/*.rs.bk
 
-# Node
+# ------------------------------------------------------------
+# Node / 前端产物
+# ------------------------------------------------------------
 node_modules/
 apps/mini-oc-web/web/dist/
+apps/mini-oc-web/web/.vite/
 
-# 本地环境与数据
+# package-lock.json 必须入库：Dockerfile 用 `npm ci` 构建，
+# 缺 lock 文件会导致镜像构建失败。开发者全局 .gitignore
+# 若忽略了它，用下面的否定规则强制纳入版本控制。
+!apps/mini-oc-web/web/package-lock.json
+
+# ------------------------------------------------------------
+# 本地环境与运行数据（含凭据，务必不入库）
+# ------------------------------------------------------------
+# .env：服务端口令 / 服务器地址等本地配置（.env.example 是模板，需入库）
 .env
+.env.*
+!.env.example
+
+# 运行时数据目录：cookie 密钥、快照等（由应用自动生成）
 data/
+
+# HMAC cookie 密钥。仓库根的 cookie_key 曾被误提交（commit b767181），
+# 已从索引移出；此处显式忽略，防止再次误入库。
+/cookie_key
+
+# 本地覆盖配置
 *.local.json
 
+# ------------------------------------------------------------
 # SDD 工作区（技能草稿，不入库）
+# ------------------------------------------------------------
 .superpowers/
 
+# ------------------------------------------------------------
 # 系统文件
+# ------------------------------------------------------------
 .DS_Store
+Thumbs.db
+desktop.ini
 
-# Flutter（客户端计划使用）
+# ------------------------------------------------------------
+# 编辑器 / IDE
+# ------------------------------------------------------------
+.idea/
+.vscode/
+*.iml
+*.swp
+
+# ------------------------------------------------------------
+# Flutter / Dart 客户端
+# ------------------------------------------------------------
+# 详细规则见 apps/mini-oc/.gitignore；此处只补根级未覆盖项。
 apps/mini-oc/.dart_tool/
-apps/mini-oc/build/
-apps/mini-oc/.flutter-plugins*
+apps/mini-oc/.flutter-plugins
+apps/mini-oc/.flutter-plugins-dependencies
+apps/mini-oc/.packages
+apps/mini-oc/pubspec.lock.bak
+
+# macOS 构建产物（Flutter 生成的 Xcode 配置与 Pods）
+apps/mini-oc/macos/Flutter/ephemeral/
+apps/mini-oc/macos/Pods/
+apps/mini-oc/macos/Flutter/Generated.xcconfig
+apps/mini-oc/macos/Flutter/flutter_export_environment.sh
+
+# Windows 构建产物
+apps/mini-oc/windows/flutter/ephemeral/
+
+# ------------------------------------------------------------
+# 打包与发布产物
+# ------------------------------------------------------------
+# 客户端 release 打包产物（build/ 已由 apps/mini-oc/.gitignore 的
+# /build/ 覆盖；此处仅兜底 macOS .app bundle 与打包临时物）
+*.app/
+*.dmg/
+*.msi/
+*.zip
+
+# ------------------------------------------------------------
+# 日志与临时文件
+# ------------------------------------------------------------
+*.log
+*.tmp
+*.bak
