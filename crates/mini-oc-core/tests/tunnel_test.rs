@@ -6,15 +6,15 @@ use mini_oc_core::tunnel::{remote_addr_for_rathole, tunnel_base_url, TunnelError
 fn tunnel_base_url_table() {
     // (public_url, port, expected)
     let cases: Vec<(&str, u16, Result<String, TunnelError>)> = vec![
-        // 无显式端口（https 单域名布局）→ 路径形态
-        ("https://oc.example.com", 9464, Ok("https://oc.example.com/9464".into())),
-        ("http://oc.example.com", 9001, Ok("http://oc.example.com/9001".into())),
-        // 带显式端口（直连隧道端点）→ 原样
+        // 无显式端口 → 拼「端口形态」{host}:{port}
+        ("https://oc.example.com", 9464, Ok("https://oc.example.com:9464".into())),
+        ("http://oc.example.com", 9001, Ok("http://oc.example.com:9001".into())),
+        // 带显式端口 → 原样
         ("http://1.2.3.4:9101", 9464, Ok("http://1.2.3.4:9101".into())),
         ("https://oc.example.com:8443", 9464, Ok("https://oc.example.com:8443".into())),
         // IPv6 host
         ("http://[::1]:8999", 9464, Ok("http://[::1]:8999".into())),
-        ("http://[2001:db8::1]", 9001, Ok("http://[2001:db8::1]/9001".into())),
+        ("http://[2001:db8::1]", 9001, Ok("http://[2001:db8::1]:9001".into())),
     ];
     for (public_url, port, expected) in cases {
         let got = tunnel_base_url(public_url, port);

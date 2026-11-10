@@ -138,19 +138,18 @@ rathole **服务端**配置由管理员在系统外维护（本系统不做服�
 2. 设备上报的 **port** ＝ 服务端该 service 的转发端口；
 3. 服务端该 service 的 **token** ＝ 该用户的 32 位密钥（「重置密钥」后需同步更新）。
 
-### 隧道地址的两种形态
+### 隧道地址（端口形态）
 
-设备 `public_url` 的写法决定了**探测 / 跳转**地址如何拼装（`crates/mini-oc-core/src/tunnel.rs`）：
+探测 / 跳转地址由「服务器地址 + opencode 端口」拼成**端口形态**（`crates/mini-oc-core/src/tunnel.rs`）：
 
 | `public_url` 形态 | 探测 / 跳转地址 | rathole `remote_addr` |
 |---|---|---|
-| 无显式端口（`https://oc.example.com`） | `{public_url}/{port}`（路径形态） | `{host}:8999` |
-| 带显式端口（`https://oc.example.com:9000`） | `public_url` 原样（独立 HTTPS 端口直连） | `{host}:8999` |
+| 无显式端口（`https://oc.example.com`） | `https://oc.example.com:{port}` | `{host}:8999` |
+| 带显式端口（`https://oc.example.com:9000`） | `public_url` 原样 | `{host}:8999` |
 
-> rathole `remote_addr` 恒定 `{host}:8999`（单 server + 统一控制端口部署），与
-> `public_url` 是否带端口无关——`public_url` 的端口是 nginx 对外跳转/探测入口，
-> 不是 rathole 控制端口。带显式端口形态用于 opencode Web UI 直连（opencode V2
-> 不支持 base-path，必须给它一个「含端口的干净 origin」才能正常穿透）。
+> 探测/跳转地址始终是**端口形态**（opencode Web UI 需要「含端口的干净 origin」，
+> 不支持 `{host}/{port}` 路径前缀部署）。rathole `remote_addr` 恒定 `{host}:8999`
+> （单 server + 统一控制端口部署），与 public_url 的端口无关。
 
 ### 设备接入流程
 

@@ -97,7 +97,7 @@ async fn jump_pair_url_guard_rejects_foreign_origin() {
     // validate_jump_url 纯函数测试：设备返回的 code 被拼装后必须落在设备隧道 origin 内
     // （防开放重定向三重校验的核心：connect URL 的 origin 必须等于 tunnel base 的 origin）
     let tunnel = mini_oc_core::tunnel::tunnel_base_url("https://oc.example.com", 9464).unwrap();
-    assert_eq!(tunnel, "https://oc.example.com/9464");
+    assert_eq!(tunnel, "https://oc.example.com:9464");
     let jump = mini_oc_web::jump::validate_jump_url(
         &format!("{tunnel}/auth/connect/abc"),
         &tunnel,
@@ -163,7 +163,7 @@ async fn device_detail_returns_no_credentials() {
         .send().await.unwrap();
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(body["tunnelBase"], "https://oc.example.com/9464");
+    assert_eq!(body["tunnelBase"], "https://oc.example.com:9464");
     assert_eq!(body["port"], 9464);
     // 安全断言：不得含 key/password 等任何凭据字段
     assert!(body.get("key").is_none());

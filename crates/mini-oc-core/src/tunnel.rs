@@ -1,10 +1,10 @@
 //! 隧道地址拼装纯函数。
 //!
-//! 设备 `public_url` 决定「探测/跳转」地址的形态（继承 V1 运维约定）：
-//! 1. **无显式端口**（https 单域名 + nginx 首段端口分流布局）：
-//!    探测/代理地址 = `{public_url}/{port}` 路径形态。
-//! 2. **带显式端口**（nginx 独立 HTTPS 端口直连）：
-//!    探测/代理地址 = `public_url` 原样。
+//! `public_url` 是设备的服务器地址（scheme://host，通常不含端口），探测/跳转
+//! 地址由「服务器地址 + opencode 端口」拼成**端口形态** `{host}:{port}`（opencode
+//! Web UI 需要含端口的干净 origin，不支持路径前缀部署）：
+//! - public_url 无显式端口：拼 `{scheme}://{host}:{port}`；
+//! - public_url 带显式端口：原样返回（端口已内嵌）。
 //!
 //! 无论哪种形态，rathole 客户端控制通道地址恒定 `{host}:8999`（单
 //! rathole server + 统一控制端口部署），与 public_url 的端口无关。
@@ -34,15 +34,17 @@ fn parse(public_url: &str) -> Result<Url, TunnelError> {
 
 /// 设备探测/代理的基础地址。
 ///
-/// - public_url 无显式端口：`{public_url}/{port}`
+/// - public_url 无显式端口：拼 `{scheme}://{host}:{port}`（端口形态）
 /// - public_url 带显式端口：原样返回
 pub fn tunnel_base_url(public_url: &str, port: u16) -> Result<String, TunnelError> {
     let url = parse(public_url)?;
-    let base = public_url.trim_end_matches('/');
     if url.port().is_some() {
-        Ok(base.to_string())
+        Ok(public_url.trim_end_matches('/').to_string())
     } else {
-        Ok(format!("{base}/{port}"))
+        // 服务器地址 + opencode 端口 → 端口形态（opencode 需要含端口的干净 origin）
+        let scheme = url.scheme();
+        let host = url.host_str().expect("parse 已保证 host 存在");
+        Ok(format!("{scheme}://{host}:{port}"))
     }
 }
 
