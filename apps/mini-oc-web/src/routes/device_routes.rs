@@ -2,7 +2,7 @@
 //! 项目/会话列表与跳转在 Task 8/9 填充。
 
 use crate::error::{AppError, AppResult};
-use crate::probe::probe_device;
+use crate::probe::{probe_device, resolve_probe_base};
 use crate::routes::auth_routes::{current_user, extract_ip};
 use crate::routes::SharedState;
 use crate::snapshot::dual_source;
@@ -291,7 +291,7 @@ async fn device_status(
     else {
         return Err(AppError::NotFound(format!("设备 {name} 不存在")));
     };
-    let probe = probe_device(device, &user.key).await;
+    let probe = probe_device(device, &user.key, &state.rathole_probe_base).await;
     Ok(Json(serde_json::json!({
         "name": name,
         "status": probe.status_str(),
@@ -326,11 +326,15 @@ async fn find_device(
 }
 
 /// 构造设备的 OcClient（basic opencode:<user.key>）。
+///
+/// 服务端主动调用走内网 rathole 直连（`internal_base`，见 [`crate::probe::resolve_probe_base`]），
+/// 未配置时退回 public_url 端口形态。
 fn device_client(
     user: &mini_oc_core::device::PortalUser,
     device: &mini_oc_core::device::UserDevice,
+    internal_base: &str,
 ) -> AppResult<OcClient> {
-    let base = tunnel_base_url(&device.public_url, device.port)
+    let base = resolve_probe_base(internal_base, &device.public_url, device.port)
         .map_err(|e| AppError::InvalidTarget(e.to_string()))?;
     Ok(OcClient::new(&base, &user.key))
 }
@@ -356,7 +360,7 @@ async fn projects(
     if let Some(cached) = state.live_cache.get(&cache_key).await {
         return Ok(Json(cached));
     }
-    let live = match device_client(&user, &device) {
+    let live = match device_client(&user, &device, &state.rathole_probe_base) {
         Ok(client) => client.projects().await.map_err(oc_err),
         Err(e) => Err(e),
     };
@@ -385,7 +389,7 @@ async fn sessions(
     if let Some(cached) = state.live_cache.get(&cache_key).await {
         return Ok(Json(cached));
     }
-    let live = match device_client(&user, &device) {
+    let live = match device_client(&user, &device, &state.rathole_probe_base) {
         Ok(client) => client.sessions(directory.as_deref()).await.map_err(oc_err),
         Err(e) => Err(e),
     };
@@ -426,9 +430,13 @@ async fn jump(
 
     let (user, device) = find_device(&state, &headers, &name).await?;
 
+    // 公网跳转入口（浏览器导航用，必须走公网地址）
     let tunnel = tunnel_base_url(&device.public_url, device.port)
         .map_err(|e| AppError::InvalidTarget(e.to_string()))?;
-    let client = OcClient::new(&tunnel, &user.key);
+    // BFF 代设备签发 pair 是服务端主动调用，走内网 rathole 直连（绕开公网回环）
+    let internal = resolve_probe_base(&state.rathole_probe_base, &device.public_url, device.port)
+        .map_err(|e| AppError::InvalidTarget(e.to_string()))?;
+    let client = OcClient::new(&internal, &user.key);
     let code = client.pair().await.map_err(oc_err)?;
 
     // session 参数当前不消费：V2 的 /auth/connect/{code} 不接受 redirect 目标，

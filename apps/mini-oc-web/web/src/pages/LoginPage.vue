@@ -9,6 +9,9 @@ const key = ref('')
 const busy = ref(false)
 const showKey = ref(false)
 
+// 首页展示的版本号（构建时注入，见 ../env.d.ts 与 vite.config.ts）
+const appVersion = __APP_VERSION__
+
 async function submit() {
   if (!key.value.trim() || busy.value) return
   busy.value = true
@@ -25,7 +28,7 @@ async function submit() {
   <div class="wrap">
     <div class="hero">
       <div class="logo">mini·oc</div>
-      <p class="sub">你的 AI 编程工作站门户</p>
+      <p class="sub">你的 AI 编程工作站门户 <span class="ver">v{{ appVersion }}</span></p>
     </div>
     <div class="card form">
       <label>用户密钥</label>
@@ -71,6 +74,7 @@ async function submit() {
 .hero { text-align: center; }
 .logo { font-size: 42px; font-weight: 800; letter-spacing: -1px; color: var(--primary); }
 .sub { color: var(--text-2); margin-top: 6px; }
+.ver { font-size: 12px; color: var(--text-2); opacity: 0.7; margin-left: 4px; }
 .form { display: flex; flex-direction: column; gap: 12px; }
 .form label { font-size: 14px; color: var(--text-2); }
 .key-field { position: relative; }

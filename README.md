@@ -58,6 +58,10 @@ Cargo workspace 成员为 `crates/mini-oc-core` 与 `apps/mini-oc-web`；`apps/m
 
 前置：Docker + 一个已在运行的 SilverBullet 实例。
 
+> **版本号约定**：首页登录页展示 `v{版本}`（形如 v2.0.1）。版本单一来源是
+> `apps/mini-oc-web/web/package.json` 的 `version`，Vite 构建时注入前端；每次更新代码
+> 后按语义化版本递增该字段（Cargo workspace 版本 `Cargo.toml` 保持同步即可）。
+
 ```bash
 # 1) 构建前端产物
 cd apps/mini-oc-web/web && npm ci && npm run build && cd ../..
@@ -117,6 +121,7 @@ Web 端集成测试用 wiremock 模拟 SilverBullet 与设备 opencode server，
 | `SB_BASE_URL` | `http://127.0.0.1:3000` | SilverBullet 地址 |
 | `SB_USER` | `admin` | SilverBullet 用户名 |
 | `SB_PASSWORD` | — | SilverBullet 密码；**兼作超管登录密码** |
+| `RATHOLE_PROBE_BASE` | 空（退回 public_url） | 服务端主动探测/列表/pair 的内网 rathole 基址（如 `http://rathole`）。门户与 rathole 同机 docker 部署时必设，否则容器访问「自己公网 IP 设备端口段」会被安全组/回环限制拒绝，设备恒判 offline |
 
 > 「本地默认」仅在未设置对应环境变量时生效；显式变量永远优先。
 

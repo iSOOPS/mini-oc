@@ -19,6 +19,10 @@ pub struct AppState {
     /// SPA 静态目录
     pub static_dir: PathBuf,
     pub started_at: chrono::DateTime<chrono::Utc>,
+    /// 内网 rathole 基址（scheme://host，不含端口）。非空时服务端探测/列表/pair
+    /// 直连内网 rathole（绕开公网隧道回环）；空串时退回 public_url 端口形态。
+    /// 生产（docker 同网络）设 `http://rathole`；本地开发/测试留空。
+    pub rathole_probe_base: String,
 }
 
 impl AppState {
@@ -50,6 +54,7 @@ impl AppState {
         };
         let mut state = Self::new(&base, &user, &pass, key_path)?;
         state.static_dir = static_dir;
+        state.rathole_probe_base = std::env::var("RATHOLE_PROBE_BASE").unwrap_or_default();
         Ok(state)
     }
 
@@ -71,6 +76,7 @@ impl AppState {
             live_cache: Arc::new(LiveCache::new()),
             static_dir,
             started_at: chrono::Utc::now(),
+            rathole_probe_base: std::env::var("RATHOLE_PROBE_BASE").unwrap_or_default(),
         })
     }
 }

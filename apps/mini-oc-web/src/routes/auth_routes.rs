@@ -149,7 +149,7 @@ async fn me(
     let enabled: Vec<&mini_oc_core::device::UserDevice> =
         user.devices.iter().filter(|d| d.enabled).collect();
     // 并发探测全部启用设备（永不抛错，慢设备 4s 超时兜底）
-    let probes = futures_probe_all(&user, &enabled).await;
+    let probes = futures_probe_all(&user, &enabled, &state.rathole_probe_base).await;
     let devices: Vec<serde_json::Value> = enabled
         .iter()
         .zip(probes)
@@ -172,8 +172,9 @@ async fn me(
 async fn futures_probe_all(
     user: &PortalUser,
     devices: &[&mini_oc_core::device::UserDevice],
+    internal_base: &str,
 ) -> Vec<crate::probe::DeviceProbe> {
-    futures::future::join_all(devices.iter().map(|d| probe_device(d, &user.key))).await
+    futures::future::join_all(devices.iter().map(|d| probe_device(d, &user.key, internal_base))).await
 }
 
 async fn me_key(
