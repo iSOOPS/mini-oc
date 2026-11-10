@@ -408,8 +408,14 @@ async fn sessions(
 // 会话跳转 + 设备详情（Task 9）
 // ---------------------------------------------------------------------------
 
-/// 跳转：BFF 代设备签发 pair code，有 session 时换 token 拼会话深链，
-/// 否则返回一次性 connect 链接。设备不可达/凭据不一致 → 显式 502。
+/// 跳转：BFF 代设备签发一次性配对码，交给浏览器导航（V2 授权模型）。
+/// 设备不可达/凭据不一致 → 显式 502。
+///
+/// V2 语义：`POST /api/pair` → 返回 `{code}`；浏览器访问 `/auth/connect/{code}`
+/// 时 opencode 签发 same-origin session cookie 并跳转到其 web 首页。
+/// 不再走 V1 的「BFF 用 code 换 token 再拼 `?auth_token=` 深链」——V2 已删除
+/// 该主鉴权路径（opencode PR #50972「replace password pairing with one-time links」），
+/// `auth_token` 在 V2 仅退作 WebSocket 专用。
 async fn jump(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -419,31 +425,18 @@ async fn jump(
     use axum::http::StatusCode;
 
     let (user, device) = find_device(&state, &headers, &name).await?;
-    let session = params.get("session").cloned();
 
     let tunnel = tunnel_base_url(&device.public_url, device.port)
         .map_err(|e| AppError::InvalidTarget(e.to_string()))?;
     let client = OcClient::new(&tunnel, &user.key);
     let code = client.pair().await.map_err(oc_err)?;
 
-    // connect 链接（旧行为：登录到 Web UI 首页，无会话定位）
-    let connect_url = || -> AppResult<String> {
-        let u = crate::jump::connect_url(&tunnel, &code);
-        crate::jump::validate_jump_url(&u, &tunnel)?;
-        Ok(u)
-    };
-
-    // 有 session 时：code 换 token → 深链定位会话；换 token 失败回退 connect 链接
-    let url = match session.as_deref().filter(|s| !s.is_empty()) {
-        Some(sid) => match client.connect(&code).await {
-            Ok(token) => crate::jump::session_deep_link(&tunnel, sid, &token)?,
-            Err(e) => {
-                tracing::warn!(%e, "pair code 换 token 失败，回退 connect 链接");
-                connect_url()?
-            }
-        },
-        None => connect_url()?,
-    };
+    // session 参数当前不消费：V2 的 /auth/connect/{code} 不接受 redirect 目标，
+    // 配对后仅登录到设备 web 首页；会话直达需等「独立 origin（子域名/独立端口）」
+    // 架构落地后再经 /server/{serverKey}/session/{id} 实现（jump::session_deep_link 已备好）。
+    let _session = params.get("session");
+    let url = crate::jump::connect_url(&tunnel, &code);
+    crate::jump::validate_jump_url(&url, &tunnel)?;
 
     if params.get("format").map(|f| f == "json").unwrap_or(false) {
         let body = serde_json::json!({"url": url, "expiresIn": 300});

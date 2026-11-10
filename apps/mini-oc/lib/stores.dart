@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'src/rust/api.dart' as rust;
 import 'src/rust/account.dart' show AccountInfo;
-import 'src/rust/api/appenv.dart' show AppEnv;
 import 'src/rust/config.dart' show ClientConfig;
 import 'src/rust/frb_generated.dart';
 import 'src/rust/portkill.dart' show PortOccupant;
@@ -27,10 +26,10 @@ class AuthState {
   final String? userName;
   final String? boundDevice;
 
-  /// env 中的记住密码勾选状态（启动回显勾选框）
+  /// config 中的记住密码勾选状态（启动回显勾选框）
   final bool rememberPassword;
 
-  /// env 中的密码明文（rememberPassword = true 时用于自动填充）
+  /// config 中的密码明文（rememberPassword = true 时用于自动填充）
   final String? savedPassword;
 
   /// 是否已记住密码（勾选且密码非空）→ 允许自动登录直达主页。
@@ -54,14 +53,33 @@ class AuthState {
       );
 }
 
+/// 基于 [cur] 构造新 ClientConfig（保留未改字段；frb 生成类无 copyWith）。
+ClientConfig _configWith(
+  ClientConfig cur, {
+  String? serverUrl,
+  bool? rememberPassword,
+  String? password,
+}) =>
+    ClientConfig(
+      serverUrl: serverUrl ?? cur.serverUrl,
+      user: cur.user,
+      boundDevice: cur.boundDevice,
+      port: cur.port,
+      opencodeBin: cur.opencodeBin,
+      deviceId: cur.deviceId,
+      theme: cur.theme,
+      rememberPassword: rememberPassword ?? cur.rememberPassword,
+      password: password ?? cur.password,
+    );
+
 class AuthNotifier extends Notifier<AuthState> {
   // —— 可覆写的 rust 桥接访问器（测试注入用；生产走全局 rust 库）——
 
-  /// 写 env（测试覆写为内存操作，避免测试写真实磁盘）。
-  Future<void> persistEnv(AppEnv env) => rust.saveAppEnv(cfg: env);
+  /// 读 config（测试覆写为内存操作，避免测试写真实磁盘）。
+  ClientConfig readConfig() => rust.loadConfig();
 
-  /// 读 env。
-  AppEnv readEnv() => rust.loadAppEnv();
+  /// 写 config。
+  Future<void> writeConfig(ClientConfig cfg) => rust.saveConfig(cfg: cfg);
 
   /// 清 config 登录态（rust logout）。
   Future<void> clearAuth() => rust.logout();
@@ -70,45 +88,58 @@ class AuthNotifier extends Notifier<AuthState> {
   Future<AccountInfo> doRustLogin(String serverUrl, String key) =>
       rust.login(serverUrl: serverUrl, key: key);
 
+  /// 设备上报（登录后主动触发，拿到自动绑定结果；测试注入内存假数据）。
+  Future<rust.ReportOutcome> doReport() => rust.reportRegistration();
+
   @override
   AuthState build() {
     // 冷启动从 Rust 配置恢复。
-    // 记住密码语义（env 文件）：勾选 → 恢复登录态（自动登录）+ 密码自动填充；
+    // 记住密码语义（config.json）：勾选 → 恢复登录态（自动登录）+ 密码自动填充；
     // 未勾选 → 不保留登录态，停在登录页。
     final cfg = rust.loadConfig();
-    final env = readEnv();
-    final remembered = env.rememberPassword && env.password.isNotEmpty && cfg.user != null;
+    final remembered = cfg.rememberPassword && cfg.password.isNotEmpty && cfg.user != null;
     return AuthState(
       userId: remembered ? cfg.user?.id : null,
       userName: remembered ? cfg.user?.name : null,
       boundDevice: remembered ? cfg.boundDevice : null,
-      rememberPassword: env.rememberPassword,
-      savedPassword: env.rememberPassword ? env.password : null,
+      rememberPassword: cfg.rememberPassword,
+      savedPassword: cfg.rememberPassword ? cfg.password : null,
     );
   }
 
   /// 登录并返回设备清单（页面据此进入绑定流程）。
   ///
   /// [remember] 为记住密码勾选状态：
-  /// - true：密码明文写入 env，保留登录态（下次启动自动登录）
-  /// - false：删除 env 中的密码；**config 登录态保留**（本次会话仍可绑定设备、
-  ///   上报注册；仅当下次冷启动时因 env 无密码而停在登录页）
+  /// - true：密码明文写入 config，保留登录态（下次启动自动登录）
+  /// - false：删除 config 中的密码；**config 登录态保留**（本次会话仍可绑定设备、
+  ///   上报注册；仅当下次冷启动时因 config 无密码而停在登录页）
   Future<AccountInfo> login(String serverUrl, String key, {bool remember = false}) async {
     final info = await doRustLogin(serverUrl, key);
-    // env 记住密码落盘（server_url / 勾选状态 / 密码明文）
-    await persistEnv(
-      AppEnv(
-        serverUrl: serverUrl,
-        rememberPassword: remember,
-        password: remember ? key : '',
-      ),
-    );
+    // 记住密码落盘到 config.json（Rust login 已写 server_url/user/bound，
+    // 这里补 remember/password）
+    final cfg = readConfig();
+    await writeConfig(_configWith(cfg,
+        rememberPassword: remember, password: remember ? key : ''));
     // 登录态保留（无论勾选与否）：绑定设备 / 设备上报都依赖 config.user。
-    // 「不记住」只影响下次冷启动（env 无密码 → build() 不恢复登录态）。
+    // 「不记住」只影响下次冷启动（config 无密码 → build() 不恢复登录态）。
     //
     // 绑定恢复（I16）：Rust login 已保留清单中仍存在的 bound_device——
     // 登录后立即从 config 读回，云服务开关不再依赖「弹层重选」。
-    final boundDevice = ref.read(rustCfgProvider).boundDevice;
+    String? boundDevice = cfg.boundDevice;
+    // 登录后主动上报一次：同步完成设备上报与自动绑定。approved+enabled 设备会被
+    // Rust 侧 auto_bind 写 config.bound_device，但那是 Rust 后台异步、Dart 内存态
+    // 不感知——若不主动刷新，主页隧道开关读旧内存仍置灰（「已绑定却提示未绑定」）。
+    // reportRegistration 幂等，与 Rust 后台静默上报重复无害。
+    try {
+      final outcome = await doReport();
+      if (outcome.bound) {
+        boundDevice = readConfig().boundDevice ?? boundDevice;
+      }
+    } catch (_) {
+      // 上报失败静默降级：boundDevice 保持 config 原值（不影响登录）
+    }
+    // 失效配置缓存：让 login_page 后续读 rustCfgProvider 拿到最新的 boundDevice
+    ref.invalidate(rustCfgProvider);
     state = AuthState(
       userId: info.id,
       userName: info.name,
@@ -119,29 +150,26 @@ class AuthNotifier extends Notifier<AuthState> {
     return info;
   }
 
-  /// 更新记住密码勾选（登录页勾选框实时同步 env）。
-  Future<void> setRememberPassword(bool remember, {String? serverUrl, String? password}) async {
-    final env = readEnv();
-    await persistEnv(
-      AppEnv(
-        serverUrl: serverUrl ?? env.serverUrl,
+  /// 更新记住密码勾选（登录页勾选框实时同步 config）。
+  Future<void> setRememberPassword(bool remember, {String? password}) async {
+    final cfg = readConfig();
+    await writeConfig(_configWith(cfg,
         rememberPassword: remember,
-        password: remember ? (password ?? env.password) : '',
-      ),
-    );
-    state = state.copyWith(rememberPassword: remember, savedPassword: remember ? (password ?? env.password) : null);
+        password: remember ? (password ?? cfg.password) : ''));
+    state = state.copyWith(
+        rememberPassword: remember,
+        savedPassword: remember ? (password ?? cfg.password) : null);
   }
 
-  /// 保存服务器地址到 env（登录页设置页用）。
+  /// 保存服务器地址到 config（登录页设置页用）。
   Future<void> saveServerUrl(String serverUrl) async {
-    final env = readEnv();
-    await persistEnv(
-      AppEnv(
-        serverUrl: serverUrl.trim(),
-        rememberPassword: env.rememberPassword,
-        password: env.password,
-      ),
-    );
+    final cfg = readConfig();
+    await writeConfig(_configWith(cfg, serverUrl: serverUrl.trim()));
+    // 失效缓存：serverUrlEffectiveProvider / rustCfgProvider 均为无 autoDispose 的
+    // 缓存 Provider，保存后必须 invalidate。否则登录页读到的仍是旧地址，Rust login
+    // 会用旧地址写回 config.json，覆盖本次保存（表现为「保存未生效、退回旧地址」）。
+    ref.invalidate(serverUrlEffectiveProvider);
+    ref.invalidate(rustCfgProvider);
   }
 
   Future<void> bindDevice(String name) async {
@@ -152,15 +180,9 @@ class AuthNotifier extends Notifier<AuthState> {
 
   Future<void> logout() async {
     await clearAuth();
-    // 登出时删除 env 中记住的密码与勾选
-    final env = readEnv();
-    await persistEnv(
-      AppEnv(
-        serverUrl: env.serverUrl,
-        rememberPassword: false,
-        password: '',
-      ),
-    );
+    // 登出时清除 config 中记住的密码与勾选
+    final cfg = readConfig();
+    await writeConfig(_configWith(cfg, rememberPassword: false, password: ''));
     state = const AuthState();
   }
 }
@@ -168,10 +190,7 @@ class AuthNotifier extends Notifier<AuthState> {
 final authProvider =
     NotifierProvider<AuthNotifier, AuthState>(AuthNotifier.new);
 
-/// 应用 env 只读快照（地址 / 记住密码 / 密码；测试可注入）。
-final appEnvProvider = Provider<AppEnv>((ref) => rust.loadAppEnv());
-
-/// 生效服务器地址（env → config 兜底 → 默认 https://oc.isoops.com）。
+/// 生效服务器地址（config.json 的 server_url → 默认 https://oc.isoops.com）。
 final serverUrlEffectiveProvider = Provider<String>((ref) => rust.serverUrlEffective());
 
 /// 本地配置只读快照（避免 UI 直接触 Rust 桥接，测试可注入）。

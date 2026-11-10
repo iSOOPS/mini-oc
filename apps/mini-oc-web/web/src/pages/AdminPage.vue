@@ -27,8 +27,10 @@ const approveForm = ref<Record<string, { open: boolean; name: string; publicUrl:
 // 停用/启用进行中的设备（key：用户id:设备id或名），防连点并发
 const toggling = ref<Record<string, boolean>>({})
 
-// 密钥一次性展示面板
-const keyPanel = ref<{ name: string; key: string } | null>(null)
+// 密钥展示面板（fresh=true：新建/重置后的一次性分发；false：主动查看已有密钥）
+const keyPanel = ref<{ name: string; key: string; fresh: boolean } | null>(null)
+// 「复制」按钮的短暂反馈态
+const copied = ref(false)
 
 onMounted(load)
 
@@ -85,7 +87,8 @@ async function saveForm() {
   error.value = ''
   try {
     const r = await api.adminCreateUser({ name: formName.value })
-    keyPanel.value = { name: r.user.name, key: r.user.key }
+    copied.value = false
+    keyPanel.value = { name: r.user.name, key: r.user.key, fresh: true }
     showForm.value = false
     await load()
   } catch (e: any) {
@@ -170,8 +173,27 @@ async function rejectPending(u: AdminUser, p: PendingDevice) {
 async function regenerate(u: AdminUser) {
   if (!confirm(`重置 ${u.name} 的密钥？旧密钥将立即失效。`)) return
   const r = await api.adminRegenerateKey(u.id)
-  keyPanel.value = { name: u.name, key: r.key }
+  copied.value = false
+  keyPanel.value = { name: u.name, key: r.key, fresh: true }
   await load()
+}
+
+// 主动查看某用户的既有密钥（只读展示，不强调「仅此一次」）
+function showKey(u: AdminUser) {
+  copied.value = false
+  keyPanel.value = { name: u.name, key: u.key, fresh: false }
+}
+
+// 复制当前面板中的密钥到剪贴板（1.5s 反馈）
+async function copyKey() {
+  if (!keyPanel.value) return
+  try {
+    await navigator.clipboard.writeText(keyPanel.value.key)
+    copied.value = true
+    setTimeout(() => (copied.value = false), 1500)
+  } catch {
+    /* 剪贴板不可用则静默忽略 */
+  }
 }
 
 async function remove(u: AdminUser) {
@@ -224,9 +246,12 @@ function setApproveField(p: PendingDevice, field: 'name' | 'publicUrl', v: strin
     </header>
 
     <div v-if="keyPanel" class="card key-panel">
-      <p><strong>{{ keyPanel.name }}</strong> 的密钥（仅此一次展示，请立即分发）：</p>
+      <p><strong>{{ keyPanel.name }}</strong> 的密钥{{ keyPanel.fresh ? '（仅此一次展示，请立即分发）' : '' }}：</p>
       <code class="key">{{ keyPanel.key }}</code>
-      <button class="btn small" @click="keyPanel = null">我已保存</button>
+      <div class="key-actions">
+        <button class="btn small" @click="copyKey">{{ copied ? '已复制' : '复制' }}</button>
+        <button class="btn ghost small" @click="keyPanel = null">{{ keyPanel.fresh ? '我已保存' : '收起' }}</button>
+      </div>
     </div>
 
     <div v-if="error" class="card err">{{ error }}</div>
@@ -301,6 +326,7 @@ function setApproveField(p: PendingDevice, field: 'name' | 'publicUrl', v: strin
           <span class="uid">#{{ u.id }}</span>
         </div>
         <div class="uactions">
+          <button class="btn ghost small" @click="showKey(u)">显示密钥</button>
           <button class="btn ghost small" @click="regenerate(u)">重置密钥</button>
           <button class="btn danger small" @click="remove(u)">删除</button>
         </div>
@@ -375,6 +401,7 @@ function setApproveField(p: PendingDevice, field: 'name' | 'publicUrl', v: strin
 .uactions { display: flex; gap: 6px; }
 .devs { margin-top: 8px; font-size: 13px; color: var(--text-2); word-break: break-all; }
 .key-panel { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.key-actions { display: flex; gap: 8px; }
 .key { align-self: stretch; background: var(--surface-2); padding: 12px; border-radius: 10px; font-size: 15px; word-break: break-all; }
 .form { display: flex; flex-direction: column; gap: 10px; }
 .form h3 { font-size: 18px; }

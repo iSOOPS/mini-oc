@@ -26,6 +26,8 @@ ClientConfig cfgWithPort(int port) => ClientConfig(
       serverUrl: 'https://oc.example.com',
       port: port,
       theme: 'system',
+      rememberPassword: false,
+      password: '',
     );
 
 Finder portField() => find.byType(TextField).at(1);

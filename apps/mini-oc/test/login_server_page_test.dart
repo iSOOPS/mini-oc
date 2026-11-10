@@ -2,17 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
-import 'package:mini_oc/src/rust/api/appenv.dart' show AppEnv;
 
 import 'package:mini_oc/pages/login_server_page.dart';
 
 import 'helpers/fake_rust.dart';
 
 void main() {
-  testWidgets('设置页预填当前地址，修改后保存到 env 并返回', (tester) async {
+  testWidgets('设置页预填当前地址，修改后保存到 config 并返回', (tester) async {
     final fake = FakeRustBridge(
-      appEnv: const AppEnv(
-          serverUrl: 'https://old.example.com', rememberPassword: false, password: ''),
+      cfg: testCfg(serverUrl: 'https://old.example.com'),
     );
     final router = GoRouter(
       initialLocation: '/login/server',
@@ -34,7 +32,7 @@ void main() {
     await tester.tap(find.text('保存'));
     await tester.pumpAndSettle();
 
-    expect(fake.appEnv.serverUrl, 'https://oc.isoops.com', reason: '新地址写入 env');
+    expect(fake.cfg.serverUrl, 'https://oc.isoops.com', reason: '新地址写入 config');
     expect(find.text('LOGIN'), findsOneWidget, reason: '保存后返回登录页');
   });
 }

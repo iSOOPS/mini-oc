@@ -148,7 +148,6 @@ impl Supervisor {
     /// 启动本地服务：spawn serve（stdout/stderr 管道接入日志）→ 探针存活（10s）→ LocalOnly。
     /// 启动本地服务（全停后重启 serve；独立入口语义 = 用户显式点本地开关）。
     pub async fn start_local(&self, port: u16) -> Result<(), String> {
-        self.stop_all().await?;
         self.spawn_serve(port).await
     }
 
@@ -179,7 +178,11 @@ impl Supervisor {
             match probe.await {
                 Ok(v) => {
                     let mut inner = self.inner.lock().unwrap();
-                    inner.mode = ServiceMode::LocalOnly;
+                    inner.mode = if inner.rathole.is_some() {
+                        ServiceMode::Cloud
+                    } else {
+                        ServiceMode::LocalOnly
+                    };
                     inner.started_ms = Some(chrono::Utc::now().timestamp_millis());
                     inner.last_error = None;
                     let st = inner.snapshot();
@@ -222,6 +225,7 @@ impl Supervisor {
             .spawn()
             .map_err(|e| format!("rathole 启动失败: {e}"))?;
         spawn_traced(&mut child, "rathole");
+        crate::config::save_rathole_pid(child.id());
         {
             let mut inner = self.inner.lock().unwrap();
             inner.rathole = Some(child);
@@ -246,6 +250,8 @@ impl Supervisor {
                 let st = inner.snapshot();
                 drop(inner);
                 self.emit(st);
+                // 进程已死，清 PID 记录（cleanup 不会误判）
+                crate::config::clear_rathole_pid();
                 false
             } else {
                 true
@@ -340,6 +346,7 @@ impl Supervisor {
         if let Some(c) = child.as_mut() {
             terminate_gracefully(c).await.map_err(|e| format!("停止 rathole 失败: {e}"))?;
         }
+        crate::config::clear_rathole_pid();
         Ok(())
     }
 
@@ -370,6 +377,7 @@ impl Supervisor {
                     let st = inner.snapshot();
                     drop(inner);
                     self.emit(st);
+                    crate::config::clear_rathole_pid();
                     tracing::warn!("rathole 崩溃（tunnel_only）");
                     continue;
                 }
@@ -381,6 +389,7 @@ impl Supervisor {
                     let st = inner.snapshot();
                     drop(inner);
                     self.emit(st);
+                    crate::config::clear_rathole_pid();
                     tracing::warn!("rathole 崩溃，降级本地");
                     continue;
                 }

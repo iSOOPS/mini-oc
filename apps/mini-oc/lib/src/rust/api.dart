@@ -4,7 +4,6 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import 'account.dart';
-import 'api/appenv.dart';
 import 'config.dart';
 import 'frb_generated.dart';
 import 'logbuf.dart';
@@ -35,14 +34,7 @@ Future<void> bindDevice({
 /// 登出（见 account::logout）。
 Future<void> logout() => RustLib.instance.api.crateApiLogout();
 
-/// 读应用 env 配置（地址 / 记住密码 / 密码；同步：本地文件操作）。
-AppEnv loadAppEnv() => RustLib.instance.api.crateApiLoadAppEnv();
-
-/// 写应用 env 配置（记住密码逻辑；docker 注入时不落文件）。
-Future<void> saveAppEnv({required AppEnv cfg}) =>
-    RustLib.instance.api.crateApiSaveAppEnv(cfg: cfg);
-
-/// 生效服务器地址：env → config.json 兜底 → 默认 https://oc.isoops.com。
+/// 生效服务器地址：config.json 的 server_url → 默认 https://oc.isoops.com。
 String serverUrlEffective() =>
     RustLib.instance.api.crateApiServerUrlEffective();
 
@@ -73,7 +65,7 @@ Future<String> resolveOpencodeBin() =>
 
 /// 上报本机设备信息到 /api/device-register（幂等，重复调用无害）。
 ///
-/// - 地址取 `server_url_effective()`（env 优先，比读 config 更稳）
+/// - 地址取 `server_url_effective()`（config.json 的 server_url，空则默认值）
 /// - 响应 deviceId 与 config 不同 → 原子写回 config.json
 /// - approved + enabled → 自动绑定：拉清单找到本机设备 → device-bind →
 ///   本地 bound_device 写盘（管理员批准即信任，免去重新登录选择）
@@ -159,6 +151,10 @@ Stream<LogLine> subscribeLogs() => RustLib.instance.api.crateApiSubscribeLogs();
 /// 同上：wrap_normal 模式 + 共享 runtime（I9）。
 Stream<ServiceState> subscribeState() =>
     RustLib.instance.api.crateApiSubscribeState();
+
+/// 清空日志缓冲（日志页「清空」按钮）：清 Rust 环形缓冲 + 推进序列号。
+/// Dart 侧收到本调用后同步清空本地 buffer，两者配合实现「清空当前打印的日志」。
+Future<void> clearLogs() => RustLib.instance.api.crateApiClearLogs();
 
 /// 项目摘要（frb）。
 class ProjectSummary {

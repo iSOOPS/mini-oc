@@ -128,8 +128,6 @@ Web 端集成测试用 wiremock 模拟 SilverBullet 与设备 opencode server，
 | `OPENCODE_BIN` | `opencode` 二进制路径（优先于配置项与 PATH） |
 | `RATHOLE_BIN` | `rathole` 客户端二进制路径（优先于随包分发与 PATH） |
 
-客户端另有 `MINI_OC_SERVER_URL` / `MINI_OC_REMEMBER_PASSWORD` / `MINI_OC_PASSWORD` 三个注入变量：任一存在时，环境配置只读不写（容器部署场景）。
-
 ---
 
 ## 运维约定（rathole）
@@ -142,12 +140,17 @@ rathole **服务端**配置由管理员在系统外维护（本系统不做服�
 
 ### 隧道地址的两种形态
 
-设备 `public_url` 的写法决定了隧道地址如何拼装（`crates/mini-oc-core/src/tunnel.rs`）：
+设备 `public_url` 的写法决定了**探测 / 跳转**地址如何拼装（`crates/mini-oc-core/src/tunnel.rs`）：
 
-| `public_url` 形态 | 探测 / 代理地址 | rathole `remote_addr` |
+| `public_url` 形态 | 探测 / 跳转地址 | rathole `remote_addr` |
 |---|---|---|
-| 无显式端口（`https://oc.example.com`） | `{public_url}/{port}`（路径形态） | `{host}:8999`（统一入口端口） |
-| 带显式端口（`http://1.2.3.4:9101`） | `public_url` 原样 | `{host}:{port}` 原样 |
+| 无显式端口（`https://oc.example.com`） | `{public_url}/{port}`（路径形态） | `{host}:8999` |
+| 带显式端口（`https://oc.example.com:9000`） | `public_url` 原样（独立 HTTPS 端口直连） | `{host}:8999` |
+
+> rathole `remote_addr` 恒定 `{host}:8999`（单 server + 统一控制端口部署），与
+> `public_url` 是否带端口无关——`public_url` 的端口是 nginx 对外跳转/探测入口，
+> 不是 rathole 控制端口。带显式端口形态用于 opencode Web UI 直连（opencode V2
+> 不支持 base-path，必须给它一个「含端口的干净 origin」才能正常穿透）。
 
 ### 设备接入流程
 
@@ -178,7 +181,7 @@ rathole **服务端**配置由管理员在系统外维护（本系统不做服�
 | GET | `/api/device-status/:name` | 单设备深探测 |
 | GET | `/api/devices/:name/projects` | 项目列表（live / 快照双源） |
 | GET | `/api/devices/:name/sessions` | 会话列表（live / 快照双源） |
-| GET | `/api/devices/:name/jump` | 会话跳转（签发 pair code → 深链） |
+| GET | `/api/devices/:name/jump` | 会话跳转（签发一次性配对链接 `/auth/connect/{code}`） |
 | GET | `/api/devices/:name/detail` | 设备连接详情（不含凭据） |
 
 ### 超管后台
@@ -210,7 +213,7 @@ rathole **服务端**配置由管理员在系统外维护（本系统不做服�
 
 **探测三态**。`200` → `online`（附版本号）；`401/403` → `auth_mismatch`（隧道通但凭据不一致，通常是重置过密钥）；超时或连接失败 → `offline`。
 
-**跳转防开放重定向**。BFF 代设备签发一次性 pair code，构造的 connect URL 会校验与隧道 base 同源（scheme + host + port 完全一致）且路径前缀匹配；会话深链的 session id 与 token 均做字符白名单校验。
+**跳转（V2 授权模型）**。BFF 代设备签发一次性 pair code，返回配对链接 `/auth/connect/{code}`（浏览器导航 → opencode 签发 same-origin session cookie 并登录）；构造的链接会校验与隧道 base 同源（scheme + host + port 完全一致）且路径前缀匹配，防开放重定向。
 
 **限流**。内存 per-IP 限流器：10 分钟内 5 次失败即拒绝；超管登录走独立 bucket，防针对高价值目标的爆破。
 

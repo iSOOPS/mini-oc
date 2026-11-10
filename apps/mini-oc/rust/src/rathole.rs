@@ -4,7 +4,7 @@
 //! - **单 service**：service 名 = 设备条目 name 原样（与运维侧服务端 toml 对账）；
 //! - token = user.key；
 //! - local_addr = 127.0.0.1:<清单 port>（opencode serve）；
-//! - remote_addr：public_url 无显式端口 → host:8999；带端口 → 原样。
+//! - remote_addr：恒定 host:8999（单 rathole server 统一控制端口，与 public_url 端口无关）。
 
 use crate::account::DeviceBrief;
 use mini_oc_core::tunnel::remote_addr_for_rathole;

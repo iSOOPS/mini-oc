@@ -307,3 +307,27 @@ async fn start_all_from_tunnel_only_adds_serve() {
     assert!(st.serve_pid.is_some(), "补齐 serve");
     sup.stop_all().await.unwrap();
 }
+
+/// 隧道与本地服务完全独立：TunnelOnly 状态启动本地服务 → Cloud（绝不杀隧道）。
+#[tokio::test]
+async fn start_local_from_tunnel_only_keeps_tunnel() {
+    let sup = test_supervisor();
+    let port = test_port(15);
+    let dir = tempfile::tempdir().unwrap();
+    let toml_path = dir.path().join("global.toml");
+    std::fs::write(&toml_path, "[client]\n").unwrap();
+
+    // 先只启动隧道
+    sup.start_tunnel(&toml_path).await.unwrap();
+    let rh_before = sup.state().rathole_pid.unwrap();
+    assert_eq!(sup.state().mode_str(), "tunnel_only");
+
+    // 再启动本地服务：隧道必须保留（回归：旧实现会 stop_all 误杀隧道）
+    sup.start_local(port).await.unwrap();
+    let st = sup.state();
+    assert_eq!(st.mode_str(), "cloud", "隧道 + 本地 → Cloud");
+    assert_eq!(st.rathole_pid, Some(rh_before), "隧道进程不被重启");
+    assert!(st.serve_pid.is_some(), "serve 已启动");
+
+    sup.stop_all().await.unwrap();
+}

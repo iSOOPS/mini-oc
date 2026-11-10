@@ -2,18 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
-import 'package:mini_oc/src/rust/api/appenv.dart' show AppEnv;
 
 import 'package:mini_oc/main.dart' show routerProvider;
 import 'package:mini_oc/pages/login_page.dart';
-import 'package:mini_oc/stores.dart';
 
 import 'helpers/fake_rust.dart';
 
 void main() {
   testWidgets('登录页：无地址输入框，仅密码框；密码默认隐藏', (tester) async {
     final fake = FakeRustBridge(
-      appEnv: const AppEnv(serverUrl: '', rememberPassword: false, password: ''),
+      cfg: testCfg(),
     );
     await tester.pumpWidget(wrapWithProviders(fake, child: const LoginPage()));
 
@@ -25,7 +23,7 @@ void main() {
 
   testWidgets('登录页：勾选记住密码时密码框显示眼睛切换按钮', (tester) async {
     final fake = FakeRustBridge(
-      appEnv: const AppEnv(serverUrl: '', rememberPassword: false, password: ''),
+      cfg: testCfg(),
     );
     await tester.pumpWidget(wrapWithProviders(fake, child: const LoginPage()));
 
@@ -42,7 +40,7 @@ void main() {
 
   testWidgets('登录页：眼睛点击切换明文/密文', (tester) async {
     final fake = FakeRustBridge(
-      appEnv: const AppEnv(serverUrl: '', rememberPassword: false, password: ''),
+      cfg: testCfg(),
     );
     await tester.pumpWidget(wrapWithProviders(fake, child: const LoginPage()));
 
@@ -56,9 +54,9 @@ void main() {
         isTrue, reason: '点击眼睛后显示明文');
   });
 
-  testWidgets('登录页：env 记住密码时自动填充密码并勾选', (tester) async {
+  testWidgets('登录页：config 记住密码时自动填充密码并勾选', (tester) async {
     final fake = FakeRustBridge(
-      appEnv: const AppEnv(
+      cfg: testCfg(
           serverUrl: 'https://oc.isoops.com', rememberPassword: true, password: 'saved-pass'),
     );
     await tester.pumpWidget(wrapWithProviders(fake, child: const LoginPage()));
@@ -73,7 +71,7 @@ void main() {
 
   testWidgets('登录页右上角设置图标 → 切换到服务器地址设置页', (tester) async {
     final fake = FakeRustBridge(
-      appEnv: const AppEnv(serverUrl: '', rememberPassword: false, password: ''),
+      cfg: testCfg(),
     );
     final router = GoRouter(
       initialLocation: '/login',
@@ -101,7 +99,7 @@ void main() {
 
   testWidgets('真实路由守卫下：未登录点击设置图标仍可进入 /login/server（不被守卫弹回）', (tester) async {
     final fake = FakeRustBridge(
-      appEnv: const AppEnv(serverUrl: '', rememberPassword: false, password: ''),
+      cfg: testCfg(),
     );
     final container = ProviderContainer(overrides: fake.overrides());
     addTearDown(container.dispose);

@@ -41,6 +41,7 @@ dependencies:
     path: rust_builder
   flutter_riverpod: ^3.4.3
   go_router: ^18.1.1
+  file_selector: ^1.0.3
 
 dev_dependencies:
   flutter_test:

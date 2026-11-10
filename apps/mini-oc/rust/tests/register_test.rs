@@ -22,7 +22,6 @@ impl Guard {
 impl Drop for Guard {
     fn drop(&mut self) {
         std::env::remove_var("MINI_OC_HOME");
-        std::env::remove_var("MINI_OC_SERVER_URL");
     }
 }
 

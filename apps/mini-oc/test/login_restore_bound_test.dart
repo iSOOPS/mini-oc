@@ -2,8 +2,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mini_oc/stores.dart';
 import 'package:mini_oc/src/rust/account.dart' show DeviceBrief;
-import 'package:mini_oc/src/rust/api/appenv.dart' show AppEnv;
-import 'package:mini_oc/src/rust/config.dart' show ClientConfig;
 
 import 'helpers/fake_rust.dart';
 
@@ -11,8 +9,7 @@ void main() {
   test('login 后 config 已有绑定且清单仍含该设备 → AuthState.boundDevice 恢复（I16）',
       () async {
     final fake = FakeRustBridge(
-      appEnv: const AppEnv(
-          serverUrl: 'https://x', rememberPassword: false, password: ''),
+      cfg: testCfg(serverUrl: 'https://x'),
       deviceBriefs: [
         DeviceBrief(
           name: 'macbook-pro',
@@ -27,12 +24,7 @@ void main() {
       ],
     );
     // 模拟 Rust login 保留 bound_device 的新行为（I16 修复后：清单仍含则不清空）
-    fake.cfg = const ClientConfig(
-      serverUrl: 'https://x',
-      boundDevice: 'macbook-pro',
-      port: 9464,
-      theme: 'system',
-    );
+    fake.cfg = testCfg(serverUrl: 'https://x', boundDevice: 'macbook-pro');
 
     final container = ProviderContainer(overrides: fake.overrides());
     addTearDown(container.dispose);

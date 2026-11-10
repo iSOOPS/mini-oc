@@ -22,6 +22,7 @@ Widget wrap({
   required Stream<ServiceState> states,
   required List<ProjectSummary> projects,
   OpenTerminalFn? open,
+  Future<String?> Function()? pick,
 }) {
   return ProviderScope(
     overrides: [
@@ -32,6 +33,7 @@ Widget wrap({
             _ses('ses_2', 'bug 修复', dir),
           ])),
       if (open != null) openInTerminalProvider.overrideWithValue(open),
+      if (pick != null) pickDirectoryFnProvider.overrideWithValue(pick),
     ],
     child: const MaterialApp(home: SessionsPage()),
   );
@@ -86,6 +88,25 @@ void main() {
     await tester.tap(find.text('重构讨论'));
     await tester.pumpAndSettle();
     expect(calls, [('/Users/x/proj-a', 'ses_1')]);
+    expect(find.text('已在系统终端打开 ✓'), findsOneWidget);
+  });
+
+  testWidgets('点击 + 选择文件夹 → 运行该路径 opencode（无会话）', (tester) async {
+    final calls = <(String, String?)>[];
+    await tester.pumpWidget(wrap(
+      states: Stream.value(const ServiceState(mode: ServiceMode.localOnly, port: 9464)),
+      projects: const [],
+      open: (dir, sid) async => calls.add((dir, sid)),
+      pick: () async => '/Users/x/new-project',
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('打开文件夹'), findsOneWidget, reason: '搜索栏左侧有 + 按钮');
+    await tester.tap(find.byTooltip('打开文件夹'));
+    await tester.pumpAndSettle();
+
+    expect(calls, [('/Users/x/new-project', null)],
+        reason: '选择的文件夹路径以无会话方式打开 opencode');
     expect(find.text('已在系统终端打开 ✓'), findsOneWidget);
   });
 }

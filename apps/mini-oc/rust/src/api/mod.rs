@@ -8,9 +8,6 @@ pub use crate::config::{ClientConfig, StoredUser};
 pub use crate::logbuf::LogLine;
 pub use crate::supervisor::ServiceState;
 
-// appenv 类型透传给 Dart（frb 需要类型定义在命名空间内可达）
-pub use crate::api::appenv::AppEnv;
-
 use crate::supervisor::{SupConfig, Supervisor};
 use mini_oc_core::ocapi::{OcApi, OcClient};
 use serde::{Deserialize, Serialize};
@@ -31,21 +28,15 @@ pub fn logout() -> Result<(), String> {
     crate::account::logout()
 }
 
-/// 读应用 env 配置（地址 / 记住密码 / 密码；同步：本地文件操作）。
-#[flutter_rust_bridge::frb(sync)]
-pub fn load_app_env() -> crate::api::appenv::AppEnv {
-    crate::api::appenv::load_app_env()
-}
-
-/// 写应用 env 配置（记住密码逻辑；docker 注入时不落文件）。
-pub fn save_app_env(cfg: crate::api::appenv::AppEnv) -> Result<(), String> {
-    crate::api::appenv::save_app_env(&cfg)
-}
-
-/// 生效服务器地址：env → config.json 兜底 → 默认 https://oc.isoops.com。
+/// 生效服务器地址：config.json 的 server_url → 默认 https://oc.isoops.com。
 #[flutter_rust_bridge::frb(sync)]
 pub fn server_url_effective() -> String {
-    crate::api::appenv::server_url_effective()
+    let v = crate::config::load_config().server_url;
+    if v.trim().is_empty() {
+        crate::config::DEFAULT_SERVER_URL.to_string()
+    } else {
+        v
+    }
 }
 
 /// 读本地配置（同步：本地文件操作）。
@@ -65,7 +56,6 @@ pub fn ping() -> String {
     "pong".into()
 }
 
-pub mod appenv;
 pub mod simple;
 
 // ---------------------------------------------------------------------------
@@ -227,7 +217,7 @@ fn report_port() -> u16 {
 
 /// 上报本机设备信息到 /api/device-register（幂等，重复调用无害）。
 ///
-/// - 地址取 `server_url_effective()`（env 优先，比读 config 更稳）
+/// - 地址取 `server_url_effective()`（config.json 的 server_url，空则默认值）
 /// - 响应 deviceId 与 config 不同 → 原子写回 config.json
 /// - approved + enabled → 自动绑定：拉清单找到本机设备 → device-bind →
 ///   本地 bound_device 写盘（管理员批准即信任，免去重新登录选择）
@@ -623,4 +613,10 @@ pub fn subscribe_state(sink: StreamSink<ServiceState>) -> Result<(), String> {
         }
     });
     Ok(())
+}
+
+/// 清空日志缓冲（日志页「清空」按钮）：清 Rust 环形缓冲 + 推进序列号。
+/// Dart 侧收到本调用后同步清空本地 buffer，两者配合实现「清空当前打印的日志」。
+pub fn clear_logs() {
+    crate::logbuf::clear_logs();
 }

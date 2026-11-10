@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mini_oc/pages/home_page.dart';
 import 'package:mini_oc/stores.dart';
-import 'package:mini_oc/src/rust/api/appenv.dart' show AppEnv;
 
 import 'package:mini_oc/src/rust/portkill.dart' show PortOccupant;
 import 'package:mini_oc/src/rust/supervisor.dart' show ServiceMode, ServiceState;
@@ -23,7 +22,7 @@ ServiceState _st(ServiceMode mode) => ServiceState(
 /// 端口占用场景的可注入桥接 Fake。
 class PortKillFakeRust extends FakeRustBridge {
   PortKillFakeRust({required this.portInUse})
-      : super(appEnv: AppEnv(serverUrl: '', rememberPassword: false, password: ''));
+      : super(cfg: testCfg());
   final bool portInUse;
 
   int killPortCalls = 0;

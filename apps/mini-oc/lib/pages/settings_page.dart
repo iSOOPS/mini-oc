@@ -22,6 +22,8 @@ ClientConfig buildSavedConfig({
     opencodeBin: current.opencodeBin,
     deviceId: current.deviceId,
     theme: current.theme,
+    rememberPassword: current.rememberPassword,
+    password: current.password,
   );
 }
 

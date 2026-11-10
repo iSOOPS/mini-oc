@@ -13,22 +13,36 @@ LogLine _l(String source, String msg) => LogLine(
       message: msg,
     );
 
-Widget wrap(Stream<List<LogLine>> stream) {
+/// 可注入日志流 + 记录 Rust 清空调用的测试 Notifier。
+class _TestLogsNotifier extends LogsNotifier {
+  _TestLogsNotifier(this.stream);
+  final Stream<LogLine> stream;
+  int clearCalls = 0;
+
+  @override
+  Stream<LogLine> logStream() => stream;
+
+  @override
+  Future<void> clearRustLogs() async {
+    clearCalls++;
+  }
+}
+
+Widget _wrap(Stream<LogLine> stream, _TestLogsNotifier notifier) {
   return ProviderScope(
-    overrides: [logsProvider.overrideWith((ref) => stream)],
+    overrides: [logsProvider.overrideWith(() => notifier)],
     child: const MaterialApp(home: LogsPage()),
   );
 }
 
 void main() {
   testWidgets('来源过滤后列表仅含选中来源', (tester) async {
-    final ctrl = StreamController<List<LogLine>>();
-    await tester.pumpWidget(wrap(ctrl.stream));
-    ctrl.add([
-      _l('opencode', 'serve started'),
-      _l('rathole', 'connected'),
-      _l('system', 'app init'),
-    ]);
+    final ctrl = StreamController<LogLine>();
+    final notifier = _TestLogsNotifier(ctrl.stream);
+    await tester.pumpWidget(_wrap(ctrl.stream, notifier));
+    ctrl.add(_l('opencode', 'serve started'));
+    ctrl.add(_l('rathole', 'connected'));
+    ctrl.add(_l('system', 'app init'));
     await tester.pumpAndSettle();
 
     expect(find.textContaining('serve started'), findsOneWidget);
@@ -45,9 +59,10 @@ void main() {
   });
 
   testWidgets('全屏切换后 AppBar 隐藏', (tester) async {
-    final ctrl = StreamController<List<LogLine>>();
-    await tester.pumpWidget(wrap(ctrl.stream));
-    ctrl.add([_l('system', 'hello')]);
+    final ctrl = StreamController<LogLine>();
+    final notifier = _TestLogsNotifier(ctrl.stream);
+    await tester.pumpWidget(_wrap(ctrl.stream, notifier));
+    ctrl.add(_l('system', 'hello'));
     await tester.pumpAndSettle();
 
     expect(find.byType(AppBar), findsOneWidget);
@@ -66,12 +81,11 @@ void main() {
     ClipboardProxy.setter = (t) async => copied.add(t);
     addTearDown(() => ClipboardProxy.setter = original);
 
-    final ctrl = StreamController<List<LogLine>>();
-    await tester.pumpWidget(wrap(ctrl.stream));
-    ctrl.add([
-      _l('opencode', 'a'),
-      _l('system', 'b'),
-    ]);
+    final ctrl = StreamController<LogLine>();
+    final notifier = _TestLogsNotifier(ctrl.stream);
+    await tester.pumpWidget(_wrap(ctrl.stream, notifier));
+    ctrl.add(_l('opencode', 'a'));
+    ctrl.add(_l('system', 'b'));
     await tester.pumpAndSettle();
 
     await tester.tap(find.byTooltip('复制全部'));
@@ -80,6 +94,23 @@ void main() {
     expect(copied.first, contains('[opencode] a'));
     expect(copied.first, contains('[system] b'));
     expect(find.textContaining('已复制'), findsOneWidget);
+    await ctrl.close();
+  });
+
+  testWidgets('点击清空 → 列表清空且 Rust 清空被调用', (tester) async {
+    final ctrl = StreamController<LogLine>();
+    final notifier = _TestLogsNotifier(ctrl.stream);
+    await tester.pumpWidget(_wrap(ctrl.stream, notifier));
+    ctrl.add(_l('opencode', 'hello'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('hello'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('清空'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('hello'), findsNothing, reason: '点击清空后日志消失');
+    expect(find.text('暂无日志'), findsOneWidget, reason: '清空后显示空态');
+    expect(notifier.clearCalls, 1, reason: '清空需同步清 Rust 环形缓冲');
     await ctrl.close();
   });
 }

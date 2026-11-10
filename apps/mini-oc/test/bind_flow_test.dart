@@ -7,7 +7,6 @@ import 'package:mini_oc/pages/home_page.dart';
 import 'package:mini_oc/pages/login_page.dart';
 import 'package:mini_oc/stores.dart';
 import 'package:mini_oc/src/rust/account.dart' show AccountInfo, DeviceBrief;
-import 'package:mini_oc/src/rust/api/appenv.dart' show AppEnv;
 import 'package:mini_oc/src/rust/config.dart' show ClientConfig;
 import 'package:mini_oc/src/rust/supervisor.dart' show ServiceMode, ServiceState;
 
@@ -66,10 +65,8 @@ Widget app(_ScriptedAuth auth) {
         (ref) => Stream.value(const ServiceState(mode: ServiceMode.off, port: 0)),
       ),
       rustCfgProvider.overrideWithValue(
-        const ClientConfig(serverUrl: 'https://oc.example.com', port: 9464, theme: 'system'),
-      ),
-      appEnvProvider.overrideWithValue(
-        const AppEnv(serverUrl: 'https://oc.example.com', rememberPassword: false, password: ''),
+        const ClientConfig(serverUrl: 'https://oc.example.com', port: 9464, theme: 'system',
+            rememberPassword: false, password: ''),
       ),
       serverUrlEffectiveProvider.overrideWithValue('https://oc.example.com'),
     ],

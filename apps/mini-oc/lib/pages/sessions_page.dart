@@ -1,9 +1,14 @@
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../stores.dart';
 import '../src/rust/api.dart' show ProjectSummary, SessionSummary;
 import '../src/rust/supervisor.dart' show ServiceMode;
+
+/// 文件夹选择（可测试注入；生产走系统目录选择器）。
+final pickDirectoryFnProvider =
+    Provider<Future<String?> Function()>((ref) => getDirectoryPath);
 
 /// 项目 → 会话浏览器：检索、点击开终端。
 class SessionsPage extends ConsumerStatefulWidget {
@@ -42,6 +47,14 @@ class _SessionsPageState extends ConsumerState<SessionsPage> {
     } catch (e) {
       messenger?.showSnackBar(SnackBar(content: Text('打开失败：$e')));
     }
+  }
+
+  /// 选择文件夹并在系统终端运行该路径的 opencode（无会话，复用点会话的打开逻辑）。
+  Future<void> _pickAndOpen() async {
+    final dir = await ref.read(pickDirectoryFnProvider)();
+    if (dir == null || dir.isEmpty) return; // 用户取消
+    if (!mounted) return;
+    await _openTerminal(dir, null);
   }
 
   @override
@@ -90,6 +103,11 @@ class _SessionsPageState extends ConsumerState<SessionsPage> {
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
                   child: Row(
                     children: [
+                      IconButton(
+                        tooltip: '打开文件夹',
+                        onPressed: _pickAndOpen,
+                        icon: const Icon(Icons.add),
+                      ),
                       Expanded(
                         child: TextField(
                           controller: _search,

@@ -25,6 +25,12 @@ class ClientConfig {
   /// system | light | dark
   final String theme;
 
+  /// 是否记住密码（登录页勾选状态）
+  final bool rememberPassword;
+
+  /// 密码明文（仅 remember_password = true 时保留）
+  final String password;
+
   const ClientConfig({
     required this.serverUrl,
     this.user,
@@ -33,6 +39,8 @@ class ClientConfig {
     this.opencodeBin,
     this.deviceId,
     required this.theme,
+    required this.rememberPassword,
+    required this.password,
   });
 
   @override
@@ -43,7 +51,9 @@ class ClientConfig {
       port.hashCode ^
       opencodeBin.hashCode ^
       deviceId.hashCode ^
-      theme.hashCode;
+      theme.hashCode ^
+      rememberPassword.hashCode ^
+      password.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -56,7 +66,9 @@ class ClientConfig {
           port == other.port &&
           opencodeBin == other.opencodeBin &&
           deviceId == other.deviceId &&
-          theme == other.theme;
+          theme == other.theme &&
+          rememberPassword == other.rememberPassword &&
+          password == other.password;
 }
 
 class StoredUser {

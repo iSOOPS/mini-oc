@@ -154,13 +154,12 @@ apps/mini-oc/build/macos/Build/Products/Release/mini_oc.app
 
 | 文件 | 位置 | 内容 |
 |---|---|---|
-| `config.json` | `MINI_OC_HOME` 或平台数据目录 | 服务器地址、用户信息、绑定设备、端口偏好、opencode 路径、device_id |
-| `.env` | 同上 | `SERVER_URL` / `REMEMBER_PASSWORD` / `PASSWORD`（勾选记住密码时才有密码） |
+| `config.json` | `MINI_OC_HOME` 或平台数据目录 | 服务器地址、用户信息、绑定设备、端口偏好、opencode 路径、device_id、记住密码勾选与密码明文 |
 | `rathole/settings/global.toml` | 同上 | 自动生成的 rathole 客户端配置（内含 `user.key`，权限 0600） |
 
 平台数据目录：macOS `~/Library/Application Support/mini-oc`，Windows `%APPDATA%\mini-oc`。`MINI_OC_HOME` 可覆盖（测试隔离用）。
 
-`config.json` 与 `.env` 均以「临时文件 + rename」原子替换写入，权限 0600。
+`config.json` 以「临时文件 + rename」原子替换写入，权限 0600。
 
 ---
 

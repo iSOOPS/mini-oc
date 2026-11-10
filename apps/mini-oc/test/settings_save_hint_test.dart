@@ -47,6 +47,8 @@ void main() {
       serverUrl: 'https://oc.example.com',
       port: 9464,
       theme: 'system',
+      rememberPassword: false,
+      password: '',
     ));
     await pumpSettings(tester, bridge);
 
@@ -65,6 +67,8 @@ void main() {
       serverUrl: 'https://old.example.com',
       port: 9464,
       theme: 'system',
+      rememberPassword: false,
+      password: '',
     ));
     await pumpSettings(tester, bridge);
 
@@ -82,6 +86,8 @@ void main() {
       serverUrl: 'https://oc.example.com',
       port: 9464,
       theme: 'system',
+      rememberPassword: false,
+      password: '',
     ));
     await pumpSettings(tester, bridge);
 

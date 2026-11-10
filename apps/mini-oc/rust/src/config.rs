@@ -6,6 +6,9 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// 默认服务器地址（config.json 无值时的兜底）。
+pub const DEFAULT_SERVER_URL: &str = "https://oc.isoops.com";
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct StoredUser {
     pub id: String,
@@ -34,6 +37,12 @@ pub struct ClientConfig {
     /// system | light | dark
     #[serde(default = "default_theme")]
     pub theme: String,
+    /// 是否记住密码（登录页勾选状态）
+    #[serde(default)]
+    pub remember_password: bool,
+    /// 密码明文（仅 remember_password = true 时保留）
+    #[serde(default)]
+    pub password: String,
 }
 
 fn default_port() -> u16 {
@@ -54,6 +63,8 @@ impl Default for ClientConfig {
             opencode_bin: None,
             device_id: None,
             theme: default_theme(),
+            remember_password: false,
+            password: String::new(),
         }
     }
 }
@@ -63,6 +74,28 @@ pub fn config_path() -> PathBuf {
     let home = std::env::var("MINI_OC_HOME").ok().map(PathBuf::from);
     let dir = home.unwrap_or_else(default_data_dir);
     dir.join("config.json")
+}
+
+/// rathole 子进程 PID 文件路径（与 config.json 同目录，用于异常关闭后清理孤儿进程）。
+pub fn rathole_pid_path() -> PathBuf {
+    config_path().with_file_name("rathole.pid")
+}
+
+/// 记录 rathole 子进程 PID（启动成功时写）。
+pub fn save_rathole_pid(pid: u32) {
+    let _ = std::fs::write(rathole_pid_path(), pid.to_string());
+}
+
+/// 读取记录的 rathole PID（文件缺失/损坏 → None）。
+pub fn load_rathole_pid() -> Option<u32> {
+    std::fs::read_to_string(rathole_pid_path())
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+}
+
+/// 清除 rathole PID 记录（正常停止/清理后）。
+pub fn clear_rathole_pid() {
+    let _ = std::fs::remove_file(rathole_pid_path());
 }
 
 pub(crate) fn default_data_dir() -> PathBuf {

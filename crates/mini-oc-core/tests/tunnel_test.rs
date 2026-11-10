@@ -41,11 +41,11 @@ fn tunnel_base_url_rejects_malformed() {
 #[test]
 fn remote_addr_for_rathole_table() {
     let cases: Vec<(&str, Result<String, TunnelError>)> = vec![
-        // host + 固定 8999
+        // 恒定 host:8999，与 public_url 是否带端口无关
         ("https://oc.example.com", Ok("oc.example.com:8999".into())),
-        ("http://1.2.3.4:9101", Ok("1.2.3.4:9101".into())), // 带显式端口原样
-        ("http://[::1]:9101", Ok("[::1]:9101".into())),
-        ("https://oc.example.com:8443", Ok("oc.example.com:8443".into())),
+        ("http://1.2.3.4:9101", Ok("1.2.3.4:8999".into())), // 带端口的跳转入口，控制端口仍 8999
+        ("http://[::1]:9101", Ok("[::1]:8999".into())),
+        ("https://oc.example.com:8443", Ok("oc.example.com:8999".into())),
     ];
     for (public_url, expected) in cases {
         let got = remote_addr_for_rathole(public_url);

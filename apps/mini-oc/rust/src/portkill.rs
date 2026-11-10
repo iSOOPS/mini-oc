@@ -151,3 +151,43 @@ fn kill_pid(pid: u32) -> Result<(), String> {
         }
     }
 }
+
+/// 进程是否存活（Unix SIGNULL 探测 / Windows tasklist）。
+pub fn process_alive(pid: u32) -> bool {
+    #[cfg(unix)]
+    {
+        use nix::sys::signal::kill;
+        use nix::unistd::Pid;
+        kill(Pid::from_raw(pid as i32), None).is_ok()
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let out = Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+            .output();
+        out
+            .map(|o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()))
+            .unwrap_or(false)
+    }
+}
+
+/// 按 PID 终止进程（SIGTERM → SIGKILL / taskkill /T /F）。
+pub fn kill_process(pid: u32) -> Result<(), String> {
+    kill_pid(pid)
+}
+
+/// 清理异常关闭残留的孤儿 rathole 进程（客户端启动时调用）。
+///
+/// 客户端异常关闭（crash/强杀）时 rathole 子进程成孤儿、继续占用服务端隧道，
+/// 新客户端再启动 rathole 会因 service 被占用而失败。启动时据此记录的 PID 清理一次。
+pub fn cleanup_orphan_rathole() {
+    if let Some(pid) = crate::config::load_rathole_pid() {
+        if process_alive(pid) {
+            tracing::info!(pid, "清理残留的孤儿 rathole 进程");
+            if let Err(e) = kill_process(pid) {
+                tracing::warn!(pid, %e, "终止孤儿 rathole 失败");
+            }
+        }
+    }
+    crate::config::clear_rathole_pid();
+}

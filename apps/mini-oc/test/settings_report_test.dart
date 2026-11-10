@@ -33,6 +33,8 @@ Widget _app({rust.ReportOutcome? outcome}) {
           serverUrl: 'https://oc.example.com',
           port: 9464,
           theme: 'system',
+          rememberPassword: false,
+          password: '',
         )),
   ];
   if (outcome != null) {
@@ -52,6 +54,8 @@ Widget _appWithFixed(_FixedRegistration fixed) {
             serverUrl: 'https://oc.example.com',
             port: 9464,
             theme: 'system',
+            rememberPassword: false,
+            password: '',
           )),
       registrationProvider.overrideWith(() => fixed),
     ],

@@ -24,10 +24,10 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   @override
   void initState() {
     super.initState();
-    // 预填：记住密码（env 勾选与密码）
-    final env = ref.read(appEnvProvider);
-    _remember = env.rememberPassword;
-    if (_remember) _key.text = env.password;
+    // 预填：记住密码（config 勾选与密码）
+    final cfg = ref.read(rustCfgProvider);
+    _remember = cfg.rememberPassword;
+    if (_remember) _key.text = cfg.password;
   }
 
   @override

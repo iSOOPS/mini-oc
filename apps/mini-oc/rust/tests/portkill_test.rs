@@ -12,7 +12,9 @@
 //! - `kill_port(port)`：查占用者 → SIGTERM → 宽限期 → SIGKILL 兜底 →
 //!   端口释放返回 Ok。杀不动/查无占用者返回 Err。
 
-use rust_lib_mini_oc::portkill::{kill_port, port_occupant, PORT_ERR_PREFIX};
+use rust_lib_mini_oc::portkill::{
+    kill_port, kill_process, port_occupant, process_alive, PORT_ERR_PREFIX,
+};
 use std::net::TcpListener;
 use std::process::{Command, Stdio};
 use std::time::Duration;
@@ -101,4 +103,19 @@ fn kill_port_err_when_no_occupant() {
 fn port_err_prefix_is_machine_readable() {
     // Dart 侧按此前缀识别「端口占用」错误 → 弹框；改前缀会静默破坏 UI 判定
     assert_eq!(PORT_ERR_PREFIX, "PORT_IN_USE:");
+}
+
+#[test]
+fn process_alive_detects_live_and_dead_process() {
+    // spawn 一个长期存活的进程
+    let mut child = Command::new("/bin/sleep")
+        .arg("300")
+        .spawn()
+        .expect("spawn sleep");
+    let pid = child.id();
+    assert!(process_alive(pid), "存活进程应判定为 alive");
+
+    kill_process(pid).expect("kill 进程应成功");
+    let _ = child.wait(); // 收尸
+    assert!(!process_alive(pid), "已退出进程应判定为 dead");
 }

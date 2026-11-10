@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:flutter/services.dart';
@@ -6,15 +8,40 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../src/rust/api.dart' as rust;
 import '../src/rust/logbuf.dart' show LogLine;
 
-/// 日志流 provider（批量缓冲，可测试注入）。
-final logsProvider = StreamProvider<List<LogLine>>((ref) async* {
-  final buffer = <LogLine>[];
-  await for (final line in rust.subscribeLogs()) {
-    buffer.add(line);
-    if (buffer.length > 2000) buffer.removeRange(0, buffer.length - 2000);
-    yield List.of(buffer);
+/// 日志状态：维护本地 buffer，支持清空（对应 Rust clear_logs）。
+class LogsNotifier extends Notifier<List<LogLine>> {
+  final List<LogLine> _buffer = [];
+  StreamSubscription<LogLine>? _sub;
+
+  /// 日志流（可覆盖用于测试注入，避免触真实 Rust 桥接）。
+  Stream<LogLine> logStream() => rust.subscribeLogs();
+
+  /// 清 Rust 侧环形缓冲（可覆盖用于测试）。
+  Future<void> clearRustLogs() => rust.clearLogs();
+
+  @override
+  List<LogLine> build() {
+    // 建立订阅；re-build 时先取消旧订阅与旧 buffer
+    _sub?.cancel();
+    _buffer.clear();
+    _sub = logStream().listen((line) {
+      _buffer.add(line);
+      if (_buffer.length > 2000) _buffer.removeRange(0, _buffer.length - 2000);
+      state = List.of(_buffer);
+    });
+    ref.onDispose(() => _sub?.cancel());
+    return const [];
   }
-});
+
+  /// 清空当前日志：清本地 buffer + 通知 Rust 清环形缓冲。
+  Future<void> clear() async {
+    _buffer.clear();
+    state = const [];
+    await clearRustLogs();
+  }
+}
+
+final logsProvider = NotifierProvider<LogsNotifier, List<LogLine>>(LogsNotifier.new);
 
 /// 剪贴板代理（测试可替换/计数）。
 class ClipboardProxy {
@@ -62,8 +89,7 @@ class _LogsPageState extends ConsumerState<LogsPage> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final logsAsync = ref.watch(logsProvider);
-    final all = logsAsync.value ?? const <LogLine>[];
+    final all = ref.watch(logsProvider);
     final lines = _filter == 'all' ? all : all.where((l) => l.source == _filter).toList();
 
     WidgetsBinding.instance.addPostFrameCallback((_) => _followBottom());
@@ -97,6 +123,11 @@ class _LogsPageState extends ConsumerState<LogsPage> {
                     ],
                   ),
                 ),
+              ),
+              IconButton(
+                tooltip: '清空',
+                icon: const Icon(Icons.delete_sweep_outlined, size: 20),
+                onPressed: lines.isEmpty ? null : () => ref.read(logsProvider.notifier).clear(),
               ),
               IconButton(
                 tooltip: '复制全部',

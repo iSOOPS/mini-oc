@@ -69,6 +69,8 @@ void main() {
     port: 9464,
     theme: 'system',
     deviceId: 'd-123',
+    rememberPassword: false,
+    password: '',
   );
 
   testWidgets('「设备上报」区存在，按钮初始可点（provider 初始 null）', (tester) async {
@@ -144,9 +146,11 @@ void main() {
     // （Rust 侧把新 deviceId="d-xyz" 写回 config.json）→ 改端口点「保存设置」。
     // 保存必须读到重算后的新 config（deviceId="d-xyz"），而非旧快照。
     final snapshots = <ClientConfig>[
-      const ClientConfig(serverUrl: 'https://oc.example.com', port: 9464, theme: 'system'),
+      const ClientConfig(serverUrl: 'https://oc.example.com', port: 9464, theme: 'system',
+          rememberPassword: false, password: ''),
       const ClientConfig(
-          serverUrl: 'https://oc.example.com', port: 9464, theme: 'system', deviceId: 'd-xyz'),
+          serverUrl: 'https://oc.example.com', port: 9464, theme: 'system', deviceId: 'd-xyz',
+          rememberPassword: false, password: ''),
     ];
     var readCount = 0;
     var saveCount = 0;
@@ -233,6 +237,8 @@ void main() {
             port: 9464,
             theme: 'system',
             boundDevice: 'office-mac', // auto_bind 已写盘，loadConfig 读到
+            rememberPassword: false,
+            password: '',
           )),
     ]);
     addTearDown(container.dispose);
@@ -254,6 +260,7 @@ void main() {
           () async => _ok('pending', false, bound: false)),
       rustCfgProvider.overrideWith((ref) => const ClientConfig(
             serverUrl: 'https://oc.example.com', port: 9464, theme: 'system',
+            rememberPassword: false, password: '',
           )),
     ]);
     addTearDown(container.dispose);

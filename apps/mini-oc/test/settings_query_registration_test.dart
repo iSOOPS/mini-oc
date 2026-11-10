@@ -5,7 +5,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mini_oc/pages/settings_page.dart';
 import 'package:mini_oc/stores.dart';
 import 'package:mini_oc/src/rust/api.dart' show ReportOutcome;
-import 'package:mini_oc/src/rust/api/appenv.dart' show AppEnv;
 import 'package:mini_oc/src/rust/config.dart' show ClientConfig;
 
 /// 固定初始态 AuthNotifier（绕过 Rust 配置读取）。
@@ -19,12 +18,12 @@ class _FixedAuth extends AuthNotifier {
 List<Override> _overrides(ReportOutcome Function() query) => [
       authProvider.overrideWith(
           () => _FixedAuth(const AuthState(userId: '1', userName: 'u'))),
-      appEnvProvider.overrideWithValue(
-          AppEnv(serverUrl: '', rememberPassword: false, password: '')),
       rustCfgProvider.overrideWith((ref) => ClientConfig(
             serverUrl: 'https://oc.example.com',
             port: 9464,
             theme: 'system',
+            rememberPassword: false,
+            password: '',
           )),
       queryRegistrationFnProvider.overrideWithValue(() async => query()),
     ];

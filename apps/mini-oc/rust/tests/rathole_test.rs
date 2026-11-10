@@ -32,10 +32,10 @@ fn toml_single_service_with_domain_public_url() {
 
 #[test]
 fn toml_single_service_with_explicit_port() {
-    // 带显式端口形态：remote_addr 原样 host:port
+    // 带显式端口（跳转入口）形态：控制端口仍恒定 host:8999
     let toml = rathole_toml(&device("http://1.2.3.4:9101"), "k").unwrap();
     let val: toml::Value = toml::from_str(&toml).unwrap();
-    assert_eq!(val["client"]["remote_addr"].as_str(), Some("1.2.3.4:9101"));
+    assert_eq!(val["client"]["remote_addr"].as_str(), Some("1.2.3.4:8999"));
 }
 
 #[test]

@@ -15,6 +15,8 @@ fn sample() -> ClientConfig {
         opencode_bin: None,
         theme: "system".into(),
         device_id: None,
+        remember_password: true,
+        password: "my-key-123".into(),
     }
 }
 
@@ -31,6 +33,8 @@ fn config_roundtrip_preserves_all_fields() {
     assert_eq!(loaded.bound_device.as_deref(), Some("macbook-pro"));
     assert_eq!(loaded.port, 9464);
     assert_eq!(loaded.theme, "system");
+    assert_eq!(loaded.remember_password, true, "记住密码字段回环保留");
+    assert_eq!(loaded.password, "my-key-123", "密码字段回环保留");
 }
 
 #[test]
