@@ -416,14 +416,15 @@ async fn sessions(
 // 会话跳转 + 设备详情（Task 9）
 // ---------------------------------------------------------------------------
 
-/// 跳转：BFF 代设备签发一次性配对码，交给浏览器导航（V2 授权模型）。
+/// 跳转：BFF 代设备签发一次性配对码（`POST /api/pair`），交给浏览器导航。
 /// 设备不可达/凭据不一致 → 显式 502。
 ///
-/// V2 语义：`POST /api/pair` → 返回 `{code}`；浏览器访问 `/auth/connect/{code}`
-/// 时 opencode 签发 same-origin session cookie 并跳转到其 web 首页。
-/// 不再走 V1 的「BFF 用 code 换 token 再拼 `?auth_token=` 深链」——V2 已删除
-/// 该主鉴权路径（opencode PR #50972「replace password pairing with one-time links」），
-/// `auth_token` 在 V2 仅退作 WebSocket 专用。
+/// 两条路径（code 一次性，只能走其一）：
+/// - **带 `session`**：BFF 服务端 redeem code 换 `token`，拼会话深链
+///   `/server/{serverKey}/session/{id}?auth_token=base64(opencode:token)`，
+///   浏览器访问后由 opencode V2 前端读取 auth_token 建立连接并直达指定会话。
+/// - **无 `session`**：返回 `/auth/connect/{code}`，浏览器兑换登录后落到设备 web 首页
+///   （`/auth/connect/{code}` 不接受 redirect 目标，无法直达会话）。
 async fn jump(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -443,12 +444,18 @@ async fn jump(
     let client = OcClient::new(&internal, &user.key);
     let code = client.pair().await.map_err(oc_err)?;
 
-    // session 参数当前不消费：V2 的 /auth/connect/{code} 不接受 redirect 目标，
-    // 配对后仅登录到设备 web 首页；会话直达需等「独立 origin（子域名/独立端口）」
-    // 架构落地后再经 /server/{serverKey}/session/{id} 实现（jump::session_deep_link 已备好）。
-    let _session = params.get("session");
-    let url = crate::jump::connect_url(&tunnel, &code);
-    crate::jump::validate_jump_url(&url, &tunnel)?;
+    let url = match params.get("session").filter(|s| !s.is_empty()) {
+        Some(session) => {
+            // 会话直达：服务端 redeem code → token → 深链（code 已消耗，深链自带 auth_token 登录）
+            let token = client.connect(&code).await.map_err(oc_err)?;
+            crate::jump::session_deep_link(&tunnel, session, &token)?
+        }
+        None => {
+            let url = crate::jump::connect_url(&tunnel, &code);
+            crate::jump::validate_jump_url(&url, &tunnel)?;
+            url
+        }
+    };
 
     if params.get("format").map(|f| f == "json").unwrap_or(false) {
         let body = serde_json::json!({"url": url, "expiresIn": 300});

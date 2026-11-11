@@ -112,16 +112,22 @@ async fn jump_pair_url_guard_rejects_foreign_origin() {
 }
 
 #[tokio::test]
-async fn jump_with_session_returns_pair_connect_url() {
-    // V2 授权模型：即使带 session 参数，也只签发一次性配对链接（/auth/connect/{code}），
-    // 不再调用 connect 换 token 拼 auth_token 深链（V1 遗留路径）。
-    // connect 端点未 mount——若 handler 误调 connect 会 404 并导致断言失败。
+async fn jump_with_session_returns_session_deep_link() {
+    // 带 session：BFF 服务端 redeem code 换 token，拼 /server/{serverKey}/session/{id}?auth_token=... 直达会话
     let sb = MockServer::start().await;
     let device = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/api/pair"))
         .respond_with(ResponseTemplate::new(200).set_body_json(
             serde_json::json!({"code": "610bsBT_9EqdC", "expires_in": 300}),
+        ))
+        .expect(1)
+        .mount(&device).await;
+    // redeem code 换 token 端点
+    Mock::given(method("GET"))
+        .and(path("/auth/connect/610bsBT_9EqdC"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            serde_json::json!({"token": "1796025749.EKzkuAmKP9wfB4QAWNYZNKlPddvzWv9ruxIYnWJ4ZHg"}),
         ))
         .expect(1)
         .mount(&device).await;
@@ -140,11 +146,13 @@ async fn jump_with_session_returns_pair_connect_url() {
         .send().await.unwrap();
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(
-        body["url"],
-        format!("{}/auth/connect/610bsBT_9EqdC", device.uri()),
-        "带 session 也应返回配对链接（不拼 auth_token 深链）"
-    );
+    let expected = mini_oc_web::jump::session_deep_link(
+        &device.uri(),
+        "ses_abc123",
+        "1796025749.EKzkuAmKP9wfB4QAWNYZNKlPddvzWv9ruxIYnWJ4ZHg",
+    )
+    .unwrap();
+    assert_eq!(body["url"], expected, "带 session 应返回会话直达深链");
     assert_eq!(body["expiresIn"], 300);
     device.verify().await;
 }

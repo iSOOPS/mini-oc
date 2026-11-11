@@ -185,7 +185,7 @@ rathole **服务端**配置由管理员在系统外维护（本系统不做服�
 | GET | `/api/device-status/:name` | 单设备深探测 |
 | GET | `/api/devices/:name/projects` | 项目列表（live / 快照双源） |
 | GET | `/api/devices/:name/sessions` | 会话列表（live / 快照双源） |
-| GET | `/api/devices/:name/jump` | 会话跳转（签发一次性配对链接 `/auth/connect/{code}`） |
+| GET | `/api/devices/:name/jump` | 会话跳转（无 `session` 返回 `/auth/connect/{code}` 登录首页；带 `session` 返回会话直达深链） |
 | GET | `/api/devices/:name/detail` | 设备连接详情（不含凭据） |
 
 ### 超管后台
@@ -217,7 +217,11 @@ rathole **服务端**配置由管理员在系统外维护（本系统不做服�
 
 **探测三态**。`200` → `online`（附版本号）；`401/403` → `auth_mismatch`（隧道通但凭据不一致，通常是重置过密钥）；超时或连接失败 → `offline`。
 
-**跳转（V2 授权模型）**。BFF 代设备签发一次性 pair code，返回配对链接 `/auth/connect/{code}`（浏览器导航 → opencode 签发 same-origin session cookie 并登录）；构造的链接会校验与隧道 base 同源（scheme + host + port 完全一致）且路径前缀匹配，防开放重定向。
+**跳转（V2 授权模型）**。BFF 代设备签发一次性 pair code（`POST /api/pair` → `{code}`）。两条路径（code 一次性，只能其一）：
+- **带 `session`**：BFF 服务端 redeem code 换 `token`（`GET /auth/connect/{code}` → `{token}`），拼会话深链 `/server/{serverKey}/session/{id}?auth_token=base64("opencode:"+token)`，浏览器访问后由 opencode V2 前端读取 `auth_token` 建立连接并直达会话（`serverKey = base64url(origin)`）。
+- **无 `session`**：返回 `/auth/connect/{code}`，浏览器兑换登录后落到设备 web 首页（`/auth/connect/{code}` 无 redirect 参数，无法直达会话）。
+
+两者均校验与隧道 base 同源（scheme + host + port 完全一致），session/token 走白名单校验，防开放重定向与路径注入。
 
 **限流**。内存 per-IP 限流器：10 分钟内 5 次失败即拒绝；超管登录走独立 bucket，防针对高价值目标的爆破。
 
