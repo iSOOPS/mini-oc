@@ -34,7 +34,8 @@ COPY --from=spa /app/web/dist /app/web/dist
 ENV WEB_PORT=8100 \
     WEB_BIND=0.0.0.0 \
     WEB_STATIC_DIR=/app/web/dist \
-    COOKIE_KEY_PATH=/data/cookie_key
+    COOKIE_KEY_PATH=/data/cookie_key \
+    RATHOLE_PROBE_BASE=http://rathole
 EXPOSE 8100
 HEALTHCHECK --interval=30s --timeout=3s \
   CMD bash -c 'exec 3<>/dev/tcp/127.0.0.1/8100 && printf "GET /healthz HTTP/1.0\r\n\r\n" >&3 && grep -q ok <&3' || exit 1

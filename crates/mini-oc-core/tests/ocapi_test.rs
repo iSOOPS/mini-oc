@@ -60,10 +60,10 @@ async fn info_401_maps_unauthorized() {
 
 #[tokio::test]
 async fn info_transport_error_on_dead_server() {
-    // 端口 1 无监听 → 连接拒绝 → Transport
+    // 端口 1 无监听 → 连接拒绝 → Transport（携带详情）
     let client = OcClient::new("http://127.0.0.1:1", "testkey1234567890abcdefghij12345");
     let err = client.info().await.unwrap_err();
-    assert!(matches!(err, OcError::Transport), "got {err:?}");
+    assert!(matches!(err, OcError::Transport(_)), "got {err:?}");
 }
 
 #[tokio::test]

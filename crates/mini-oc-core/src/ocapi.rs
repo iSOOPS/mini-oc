@@ -13,8 +13,9 @@ use std::time::Duration;
 pub enum OcError {
     #[error("鉴权失败 (HTTP {0})：凭据与设备端不一致")]
     Unauthorized(u16),
-    #[error("连接失败：设备不可达")]
-    Transport,
+    /// 携带底层连接错误详情（connection refused / timeout / dns 等），用于可观测诊断。
+    #[error("连接失败：{0}")]
+    Transport(String),
     #[error("服务端响应异常: {0}")]
     Other(String),
 }
@@ -175,7 +176,7 @@ impl OcClient {
         if !query.is_empty() {
             req = req.query(query);
         }
-        let resp = req.send().await.map_err(|_| OcError::Transport)?;
+        let resp = req.send().await.map_err(|e| OcError::Transport(e.to_string()))?;
         Self::decode(resp).await
     }
 
@@ -238,7 +239,7 @@ impl OcApi for OcClient {
             .basic_auth("opencode", Some(&self.password))
             .send()
             .await
-            .map_err(|_| OcError::Transport)?;
+            .map_err(|e| OcError::Transport(e.to_string()))?;
         #[derive(Deserialize)]
         struct PairResp {
             code: String,
@@ -254,7 +255,7 @@ impl OcApi for OcClient {
     /// 无 Accept 头拿 JSON。code 一次性：复用/伪造返回 401。
     async fn connect(&self, code: &str) -> Result<String, OcError> {
         let url = format!("{}/auth/connect/{code}", self.base);
-        let resp = self.http.get(&url).send().await.map_err(|_| OcError::Transport)?;
+        let resp = self.http.get(&url).send().await.map_err(|e| OcError::Transport(e.to_string()))?;
         #[derive(Deserialize)]
         struct ConnectResp {
             token: String,

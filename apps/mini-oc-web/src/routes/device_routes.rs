@@ -292,10 +292,13 @@ async fn device_status(
         return Err(AppError::NotFound(format!("设备 {name} 不存在")));
     };
     let probe = probe_device(device, &user.key, &state.rathole_probe_base).await;
+    // 诊断字段：探测采用的候选基址（内网优先），便于定位「未启动服务」的实际路径
+    let probe_bases = crate::probe::probe_bases(&state.rathole_probe_base, &device.public_url, device.port);
     Ok(Json(serde_json::json!({
         "name": name,
         "status": probe.status_str(),
         "version": probe.version(),
+        "probeBases": probe_bases,
     })))
 }
 
@@ -345,7 +348,8 @@ fn oc_err(e: OcError) -> AppError {
         OcError::Unauthorized(code) => {
             AppError::AuthMismatch(format!("设备凭据不一致 (HTTP {code})"))
         }
-        OcError::Transport => AppError::DeviceOffline("设备不可达".into()),
+        // 连接失败详情透传（connection refused / timeout 等），便于前端与日志定位
+        OcError::Transport(m) => AppError::DeviceOffline(m),
         OcError::Other(m) => AppError::DeviceOffline(m),
     }
 }
