@@ -1,4 +1,6 @@
-//! Task 4：进程监督状态机测试（/bin/sleep 替身 + 注入探针）。
+//! Task 4：进程监督状态机测试（sleep 替身 + 注入探针）。
+
+mod common;
 
 use rust_lib_mini_oc::supervisor::{SupConfig, Supervisor};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -10,19 +12,11 @@ fn test_port(idx: u16) -> u16 {
     20000 + ((std::process::id() % 1000) as u16) * 30 + idx
 }
 
-/// 构造测试用 Supervisor：serve/rathole 命令都是 `sleep 300`，探针立即成功。
+/// 构造测试用 Supervisor：serve/rathole 命令都是长存活待杀进程，探针立即成功。
 fn test_supervisor() -> Supervisor {
     Supervisor::new(SupConfig {
-        serve_command: Box::new(|_port| {
-            let mut c = std::process::Command::new("/bin/sleep");
-            c.arg("300");
-            c
-        }),
-        rathole_command: Box::new(|_toml_path| {
-            let mut c = std::process::Command::new("/bin/sleep");
-            c.arg("300");
-            c
-        }),
+        serve_command: Box::new(|_port| common::sleeper(300)),
+        rathole_command: Box::new(|_toml_path| common::sleeper(300)),
         probe: Box::new(|_| Box::pin(async { Ok("test".into()) })),
     })
 }
@@ -80,12 +74,8 @@ async fn kill_serve_detected_and_state_goes_off_with_error() {
         sup2.run_monitor().await;
     });
 
-    // 外部击杀 serve（模拟崩溃）
-    let kill = std::process::Command::new("kill")
-        .args(["-9", &pid.to_string()])
-        .status()
-        .unwrap();
-    assert!(kill.success());
+    // 外部击杀 serve（模拟崩溃）——复用 portkill 的跨平台终止（Unix SIGKILL / Windows taskkill）
+    rust_lib_mini_oc::portkill::kill_process(pid).expect("杀掉 serve 进程");
 
     wait_for(&sup, |s| {
         let st = s.state();
@@ -139,11 +129,10 @@ async fn stop_all_leaves_no_orphan() {
 
     sup.stop_all().await.unwrap();
     assert_eq!(sup.state().mode_str(), "off");
-    // 进程确实退出（kill -0 失败）
+    // 进程确实退出（复用 cross-platform process_alive）
     std::thread::sleep(Duration::from_millis(200));
-    let alive = |pid: u32| std::process::Command::new("kill").arg("-0").arg(pid.to_string()).status().map(|s| s.success()).unwrap_or(false);
-    assert!(!alive(serve_pid), "serve 无孤儿进程");
-    assert!(!alive(rathole_pid), "rathole 无孤儿进程");
+    assert!(!rust_lib_mini_oc::portkill::process_alive(serve_pid), "serve 无孤儿进程");
+    assert!(!rust_lib_mini_oc::portkill::process_alive(rathole_pid), "rathole 无孤儿进程");
 }
 
 #[tokio::test]
@@ -151,16 +140,8 @@ async fn start_local_probe_failure_stops_and_reports() {
     // 探针始终失败（模拟 opencode serve 起不来）
     static CALLS: AtomicUsize = AtomicUsize::new(0);
     let sup = Supervisor::new(SupConfig {
-        serve_command: Box::new(|_port| {
-            let mut c = std::process::Command::new("/bin/sleep");
-            c.arg("300");
-            c
-        }),
-        rathole_command: Box::new(|_| {
-            let mut c = std::process::Command::new("/bin/sleep");
-            c.arg("300");
-            c
-        }),
+        serve_command: Box::new(|_port| common::sleeper(300)),
+        rathole_command: Box::new(|_| common::sleeper(300)),
         probe: Box::new(|_| {
             CALLS.fetch_add(1, Ordering::SeqCst);
             Box::pin(async { Err("探针失败：serve 未就绪".into()) })
@@ -201,7 +182,6 @@ async fn start_local_port_in_use_error_carries_prefix() {
 #[tokio::test]
 async fn start_tunnel_only_runs_rathole_without_serve() {
     let sup = test_supervisor();
-    let port = test_port(10);
     let dir = tempfile::tempdir().unwrap();
     let toml_path = dir.path().join("global.toml");
     std::fs::write(&toml_path, "[client]\n").unwrap();

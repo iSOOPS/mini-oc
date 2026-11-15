@@ -136,7 +136,11 @@ apps/mini-oc/build/macos/Build/Products/Release/mini_oc.app
 
 ### Windows
 
-见 [`scripts/build-windows.md`](scripts/build-windows.md)：需要 VS Build Tools（C++ 桌面开发负载）+ msvc 工具链，产物在 `build/windows/x64/runner/Release/`，rathole 二进制放到与 exe 同级的 `assets/rathole/bin/windows-x86_64/`。
+```bash
+cd apps/mini-oc && ./scripts/build-windows.ps1      # PowerShell
+```
+
+需要 Flutter SDK + Rust(msvc, VS Build Tools「C++ 桌面开发」负载) + `flutter_rust_bridge_codegen` 2.11.1。脚本会依次 frb codegen → `flutter build windows --release` → 把 rathole 二进制打包到与 exe 同级的 `assets/rathole/bin/windows-x86_64/`。产物：`build/windows/x64/runner/Release/`（整个目录分发）。详见 [`scripts/build-windows.md`](scripts/build-windows.md)。
 
 ### rathole 二进制定位顺序
 

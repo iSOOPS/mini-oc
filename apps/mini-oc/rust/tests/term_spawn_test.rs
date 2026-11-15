@@ -1,7 +1,9 @@
 //! Task 6：终端启动器测试——凭据零泄露契约。
 
+#[cfg(unix)]
 use rust_lib_mini_oc::term_spawn::{build_terminal_plan, cleanup_env_files};
 
+#[cfg(unix)]
 const KEY: &str = "supersecretkey1234567890ABCDEF";
 
 #[cfg(unix)]

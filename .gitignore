@@ -52,6 +52,11 @@ data/
 .superpowers/
 
 # ------------------------------------------------------------
+# AI 助手本地工作区（WorkBuddy 会话数据 / 记忆 / 中间产物，不入库）
+# ------------------------------------------------------------
+.workbuddy/
+
+# ------------------------------------------------------------
 # 系统文件
 # ------------------------------------------------------------
 .DS_Store
@@ -84,6 +89,15 @@ apps/mini-oc/macos/Flutter/flutter_export_environment.sh
 
 # Windows 构建产物
 apps/mini-oc/windows/flutter/ephemeral/
+
+# Flutter 自动生成的插件注册文件（`flutter pub get` 每次重新生成，非手写源码）
+apps/mini-oc/macos/Flutter/GeneratedPluginRegistrant.swift
+apps/mini-oc/windows/flutter/generated_plugin_registrant.cc
+apps/mini-oc/windows/flutter/generated_plugin_registrant.h
+apps/mini-oc/windows/flutter/generated_plugins.cmake
+
+# Rust 调试符号（Windows msvc 构建产物）
+**/*.pdb
 
 # ------------------------------------------------------------
 # 打包与发布产物

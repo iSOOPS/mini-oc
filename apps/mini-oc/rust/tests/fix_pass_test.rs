@@ -1,5 +1,7 @@
 //! 修复 pass 补充：I4（子进程 stdout 接入日志）与 I7（rathole toml 权限）。
 
+mod common;
+
 use rust_lib_mini_oc::logbuf::{push_log, recent_logs, clear_logs};
 use rust_lib_mini_oc::rathole::{rathole_toml, write_settings_toml};
 use rust_lib_mini_oc::account::DeviceBrief;
@@ -48,19 +50,8 @@ async fn child_stdout_streams_into_logbuf() {
     clear_logs();
     // serve 替身：打印两行后保持运行
     let sup = Supervisor::new(SupConfig {
-        serve_command: Box::new(|port| {
-            let mut c = std::process::Command::new("/bin/bash");
-            c.args([
-                "-c",
-                &format!("echo 'serve ready on {port}'; echo 'secondary line'; sleep 60"),
-            ]);
-            c
-        }),
-        rathole_command: Box::new(|_| {
-            let mut c = std::process::Command::new("/bin/bash");
-            c.args(["-c", "echo 'rathole boot'; sleep 60"]);
-            c
-        }),
+        serve_command: Box::new(common::echo_then_sleep),
+        rathole_command: Box::new(|_| common::sleeper(60)),
         probe: Box::new(|_| Box::pin(async { Ok("test".into()) })),
     });
     let port = 21000 + (std::process::id() % 500) as u16 * 2;

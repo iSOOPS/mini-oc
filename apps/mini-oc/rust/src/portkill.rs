@@ -113,7 +113,8 @@ fn process_name(pid: u32) -> Option<String> {
             .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
             .output()
             .ok()?;
-        let line = String::from_utf8_lossy(&out.stdout).lines().next()?;
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let line = stdout.lines().next()?;
         let name = line.split(',').next()?.trim_matches('"');
         if name.is_empty() { None } else { Some(name.to_string()) }
     }

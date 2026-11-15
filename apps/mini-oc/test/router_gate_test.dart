@@ -12,10 +12,13 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   setUpAll(() async {
-    // Rust 桥接（AuthNotifier.build 冷启动会读本地配置）
+    // Rust 桥接（AuthNotifier.build 冷启动会读本地配置）；按平台选动态库扩展名。
+    final libName = Platform.isWindows
+        ? 'rust_lib_mini_oc.dll'
+        : (Platform.isMacOS ? 'librust_lib_mini_oc.dylib' : 'librust_lib_mini_oc.so');
     final candidates = [
-      '../rust/target/debug/librust_lib_mini_oc.dylib',
-      'rust/target/debug/librust_lib_mini_oc.dylib',
+      '../rust/target/debug/$libName',
+      'rust/target/debug/$libName',
     ];
     final path = candidates.firstWhere((c) => File(c).existsSync(), orElse: () => candidates.first);
     await RustLib.init(externalLibrary: ExternalLibrary.open(path));

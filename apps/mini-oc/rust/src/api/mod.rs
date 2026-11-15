@@ -99,6 +99,11 @@ fn real_serve_command() -> Box<dyn Fn(u16) -> std::process::Command + Send + Syn
 }
 
 /// opencode 二进制定位：OPENCODE_BIN env → config.opencode_bin → PATH。
+///
+/// Windows 特判：默认名 `opencode` 在 Windows 上通常是 npm 生成的
+/// `opencode.cmd`/`opencode`（shell 脚本）而非可执行文件，`Command::new("opencode")`
+/// 不做 PATHEXT 扩展会 `NotFound`。故默认回退时优先探测 `opencode.cmd`，其次
+/// `opencode.exe`，都无则退回 `opencode`（交由上层 spawn 报明确错误）。
 pub fn resolve_opencode_bin() -> String {
     if let Ok(p) = std::env::var("OPENCODE_BIN") {
         if !p.is_empty() {
@@ -110,7 +115,35 @@ pub fn resolve_opencode_bin() -> String {
             return p;
         }
     }
+    default_opencode_bin()
+}
+
+/// 默认 opencode 二进制名（Windows 探测 .cmd/.exe；其余平台 `opencode`）。
+pub(crate) fn default_opencode_bin() -> String {
+    #[cfg(target_os = "windows")]
+    {
+        // npm 安装的 opencode 在 Windows 上落为 opencode.cmd（或 .exe）；Rust 的
+        // Command::new 不会自动补扩展名，须显式探测可执行的那一个。
+        if which_in_path("opencode.cmd") {
+            return "opencode.cmd".into();
+        }
+        if which_in_path("opencode.exe") {
+            return "opencode.exe".into();
+        }
+    }
     "opencode".into()
+}
+
+/// 探测某可执行名是否存在于 PATH（Windows 特判辅助，跨平台安全）。
+#[cfg(target_os = "windows")]
+fn which_in_path(name: &str) -> bool {
+    std::env::var_os("PATH")
+        .map(|p| {
+            std::env::split_paths(&p)
+                .map(|dir| dir.join(name))
+                .any(|full| full.is_file())
+        })
+        .unwrap_or(false)
 }
 
 /// 真实探针：GET /api/info（basic opencode:<key>）。

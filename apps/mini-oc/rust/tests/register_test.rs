@@ -273,14 +273,16 @@ async fn report_registration_empty_device_id_not_persisted() {
 // ---------------------------------------------------------------------------
 
 /// 预置服务端用户清单：本机设备已在 devices 中（管理员批准后的状态）。
-/// deviceName 必须是真实主机名（服务端 approve 转正时来自上报请求体）。
+/// deviceName 必须是真实主机名（服务端 approve 转正时来自上报请求体）；
+/// pctype 用当前真实 OS（生产代码 auto_bind 按 `std::env::consts::OS` 匹配）。
 fn user_info_with_device(name: &str) -> serde_json::Value {
+    let os = std::env::consts::OS;
     serde_json::json!({
         "id": "100001",
         "name": "samuel",
         "key": "k".repeat(32),
         "devices": [
-            {"desc": "d", "name": name, "port": 9464, "pctype": "macos",
+            {"desc": "d", "name": name, "port": 9464, "pctype": os,
              "deviceName": whoami::devicename(), "bound": false,
              "publicUrl": "https://oc.example.com"}
         ]

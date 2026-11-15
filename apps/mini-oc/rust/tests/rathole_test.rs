@@ -98,3 +98,46 @@ fn resolve_near_returns_none_when_no_bundle_anywhere() {
     let found = resolve_rathole_bin_near(&exe_dir, "macos-aarch64");
     assert_eq!(found, None, "无 bundle 时路径探测应返回 None");
 }
+
+/// Windows 打包布局的 rathole 探测（exe 同目录 assets）。
+///
+/// 症状：Windows 上启动隧道报「未找到 rathole 客户端」。
+/// 根因排查：`current_exe()` 是 `Release/mini_oc.exe`，rathole 由打包脚本
+/// 复制到 **exe 同目录** `assets/rathole/bin/windows-x86_64/`。若该布局未被
+/// 正确探测（或打包时漏复制），`resolve_rathole_bin_near` 会返回 None。
+///
+/// 此处固化「exe 同目录 assets」的探测契约，确保 Windows 打包布局始终可命中。
+#[cfg(target_os = "windows")]
+#[test]
+fn resolve_finds_rathole_next_to_exe_on_windows() {
+    use rust_lib_mini_oc::rathole::resolve_rathole_bin_near;
+
+    // 模拟 Release 布局：exe 在 Release/，rathole 在 Release/assets/rathole/bin/windows-x86_64/
+    let tmp = tempfile::tempdir().unwrap();
+    let exe_dir = tmp.path().join("Release");
+    std::fs::create_dir_all(&exe_dir).unwrap();
+    let plat = format!("windows-{}", std::env::consts::ARCH);
+    let bin = exe_dir
+        .join("assets/rathole/bin")
+        .join(&plat)
+        .join("rathole.exe");
+    std::fs::create_dir_all(bin.parent().unwrap()).unwrap();
+    std::fs::write(&bin, b"fake").unwrap();
+
+    let found = resolve_rathole_bin_near(&exe_dir, &plat);
+    assert_eq!(found, Some(bin), "应探测到 exe 同目录的 bundle rathole.exe");
+}
+
+/// Windows 空目录树：无 bundle → None。
+#[cfg(target_os = "windows")]
+#[test]
+fn resolve_near_returns_none_when_no_bundle_on_windows() {
+    use rust_lib_mini_oc::rathole::resolve_rathole_bin_near;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let exe_dir = tmp.path().join("Release");
+    std::fs::create_dir_all(&exe_dir).unwrap();
+
+    let found = resolve_rathole_bin_near(&exe_dir, "windows-x86_64");
+    assert_eq!(found, None, "无 bundle 时路径探测应返回 None");
+}

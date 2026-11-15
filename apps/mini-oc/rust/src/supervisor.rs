@@ -462,7 +462,25 @@ async fn terminate_gracefully(child: &mut std::process::Child) -> std::io::Resul
         if !out.status.success() {
             let _ = child.kill();
         }
-        let _ = child.wait();
+        // `child.wait()` 会阻塞到子进程退出 **且** stdout/stderr 管道被所有
+        // 继承句柄者（如 opencode 的子进程）关闭为止。Windows 上 opencode（Bun
+        // 单文件可执行）spawn 的 node 子进程会继承管道句柄，taskkill 后若其退出
+        // 缓慢，wait 会无限阻塞——表现为关窗要等数十秒。故此处用 try_wait 轮询 +
+        // 2s 上限，超时即放弃（进程退出后由 OS 回收），不再卡住关闭流程。
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            match child.try_wait() {
+                Ok(Some(_)) => break,
+                Ok(None) => {
+                    if tokio::time::Instant::now() >= deadline {
+                        tracing::warn!(pid, "子进程未在 2s 内退出，放弃等待（OS 将回收）");
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+                Err(_) => break,
+            }
+        }
         Ok(())
     }
 }

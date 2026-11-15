@@ -49,6 +49,8 @@ pub fn build_terminal_plan(
     }
     #[cfg(target_os = "windows")]
     {
+        // Windows 凭据经进程 env 注入（open_in_terminal），此处 user_key 不参与脚本/文件生成
+        let _ = user_key;
         build_windows(binary, server_url, directory, session, &tmp, &nonce)
     }
 }
@@ -126,12 +128,12 @@ fn build_windows(
     directory: &str,
     session: Option<&str>,
     tmp: &Path,
-    _nonce: &str,
+    nonce: &str,
 ) -> Result<TerminalPlan, String> {
-    // env 经进程链继承（cmd /c start 子进程继承 env），launcher.ps1 只读 $env:
     // PowerShell 单引号转义：' → ''（I6）
     let ps = |s: &str| s.replace('\'', "''");
-    let script_path = tmp.join(format!("{ENV_PREFIX}{}.ps1", std::process::id()));
+    // 文件名带 nonce，避免同进程内快速连续打开多个会话时互相覆盖
+    let script_path = tmp.join(format!("{ENV_PREFIX}{nonce}.ps1"));
     let session_arg = session
         .map(|s| format!(" --session '{}'", ps(s)))
         .unwrap_or_default();
@@ -143,55 +145,54 @@ fn build_windows(
         session_arg,
     );
     std::fs::write(&script_path, &script_content).map_err(|e| format!("写入脚本失败: {e}"))?;
-    let display_command = format!(
-        "cmd /c start \"mini-oc\" pwsh -NoExit -ExecutionPolicy Bypass -File \"{}\"",
-        script_path.display()
-    );
+    // display_command 仅作展示/日志用（不含凭据）；真正 spawn 见 open_in_terminal
+    // （Windows 直接以 powershell.exe -File 启动，避免 cmd /c start 的引号解析坑）
+    let display_command = format!("powershell -NoExit -File \"{}\"", script_path.display());
     Ok(TerminalPlan {
         display_command,
         files: vec![PlanFile { path: script_path, content: script_content, mode: 0o644 }],
     })
 }
 
-/// 执行启动计划（spawn display_command；env 继承 + Windows 注入 OPENCODE_PASSWORD）。
+/// 执行启动计划（按平台 spawn；Windows 直接以 powershell.exe 新窗口运行脚本，
+/// 并把 OPENCODE_PASSWORD 经进程 env 注入——避免 cmd /c start 的引号解析坑）。
 pub fn open_in_terminal(binary: &str, server_url: &str, directory: &str, session: Option<&str>, user_key: &str) -> Result<(), String> {
     // 先清理过期 env 文件
     if let Err(e) = cleanup_env_files(&std::env::temp_dir()) {
         tracing::warn!(%e, "清理过期终端 env 文件失败");
     }
     let plan = build_terminal_plan(binary, server_url, directory, session, None, user_key)?;
-    let mut cmd = shell_command(&plan.display_command);
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.env("OPENCODE_PASSWORD", user_key); // 进程链继承
-        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW（防 shim 闪窗）
-    }
-    #[cfg(unix)]
-    {
-        let _ = user_key; // macOS 经 env 文件，无需进程 env
-    }
-    cmd.spawn()
-        .map_err(|e| format!("打开终端失败: {e}"))?;
-    Ok(())
+    spawn_plan(&plan, user_key)
 }
 
 #[cfg(unix)]
-fn shell_command(display: &str) -> std::process::Command {
+fn spawn_plan(plan: &TerminalPlan, _user_key: &str) -> Result<(), String> {
+    // macOS 经 env 文件，无需进程 env；display_command 是 osascript 命令，交给 bash -c
     let mut c = std::process::Command::new("/bin/bash");
-    c.arg("-c").arg(display);
-    c
+    c.arg("-c").arg(&plan.display_command);
+    c.spawn().map_err(|e| format!("打开终端失败: {e}"))?;
+    Ok(())
 }
 
 #[cfg(target_os = "windows")]
-fn shell_command(display: &str) -> std::process::Command {
-    // display_command 本身就是 cmd /c ... 形式
-    let mut parts = display.splitn(4, ' ');
-    let mut c = std::process::Command::new(parts.next().unwrap_or("cmd"));
-    for p in parts {
-        c.arg(p);
-    }
-    c
+fn spawn_plan(plan: &TerminalPlan, user_key: &str) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    // 取 launcher.ps1 脚本路径（build_windows 写入的唯一文件）
+    let script = plan
+        .files
+        .iter()
+        .find(|f| f.path.extension().and_then(|e| e.to_str()) == Some("ps1"))
+        .map(|f| &f.path)
+        .ok_or("终端启动脚本缺失")?;
+    // 直接启动新的 PowerShell 窗口（CREATE_NEW_CONSOLE）运行 launcher.ps1；
+    // -NoExit 使 opencode 退出后窗口保留；OPENCODE_PASSWORD 经进程 env 链传递给 opencode。
+    let mut c = std::process::Command::new("powershell.exe");
+    c.args(["-NoProfile", "-NoExit", "-ExecutionPolicy", "Bypass", "-File"])
+        .arg(script)
+        .env("OPENCODE_PASSWORD", user_key)
+        .creation_flags(0x0000_0010); // CREATE_NEW_CONSOLE
+    c.spawn().map_err(|e| format!("打开终端失败: {e}"))?;
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -210,7 +211,9 @@ pub fn cleanup_env_files(dir: &Path) -> std::io::Result<()> {
     for entry in entries.flatten() {
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        if name.starts_with(ENV_PREFIX) && (name.ends_with(".env") || name.ends_with(".sh")) {
+        if name.starts_with(ENV_PREFIX)
+            && (name.ends_with(".env") || name.ends_with(".sh") || name.ends_with(".ps1"))
+        {
             let stale = entry
                 .metadata()
                 .ok()

@@ -16,11 +16,17 @@ use rust_lib_mini_oc::portkill::{
     kill_port, kill_process, port_occupant, process_alive, PORT_ERR_PREFIX,
 };
 use std::net::TcpListener;
+#[cfg(unix)]
 use std::process::{Command, Stdio};
+#[cfg(unix)]
 use std::time::Duration;
 
-/// 起一个占住端口的子进程（python http.server，macOS 自带 python3）。
+mod common;
+
+/// 起一个占住端口的子进程（Unix：python http.server）。
 /// 若端口已被遗留进程占用（历史测试失败残留等），先清场再起，测试自愈。
+/// Windows 无自带 python3，此处仅作 Unix 专用替身（Windows 端 netstat 路径见 production 代码）。
+#[cfg(unix)]
 fn spawn_port_holder(port: u16) -> std::process::Child {
     let _ = kill_port(port); // 清场失败则由后续断言暴露
     Command::new("/usr/bin/python3")
@@ -32,6 +38,7 @@ fn spawn_port_holder(port: u16) -> std::process::Child {
 }
 
 /// 等待端口真正被监听（进程启动 → bind 有延迟）。
+#[cfg(unix)]
 fn wait_listening(port: u16, timeout: Duration) {
     let deadline = std::time::Instant::now() + timeout;
     loop {
@@ -46,6 +53,7 @@ fn wait_listening(port: u16, timeout: Duration) {
 }
 
 #[test]
+#[cfg(unix)]
 fn port_occupant_finds_listener_process() {
     let port = 22000 + (std::process::id() % 1000) as u16;
     let mut child = spawn_port_holder(port);
@@ -72,6 +80,7 @@ fn port_occupant_none_when_port_free() {
 }
 
 #[test]
+#[cfg(unix)]
 fn kill_port_releases_occupied_port() {
     let port = 23000 + (std::process::id() % 1000) as u16;
     let mut child = spawn_port_holder(port);
@@ -108,10 +117,7 @@ fn port_err_prefix_is_machine_readable() {
 #[test]
 fn process_alive_detects_live_and_dead_process() {
     // spawn 一个长期存活的进程
-    let mut child = Command::new("/bin/sleep")
-        .arg("300")
-        .spawn()
-        .expect("spawn sleep");
+    let mut child = common::sleeper(300).spawn().expect("spawn sleeper");
     let pid = child.id();
     assert!(process_alive(pid), "存活进程应判定为 alive");
 
