@@ -69,6 +69,38 @@ pub fn probe_bases(internal_base: &str, public_url: &str, port: u16) -> Vec<Stri
     bases
 }
 
+/// 在候选基址列表上依次执行请求（与 [`probe_device`] 同一回退策略）：
+/// - 任一成功 → 立即返回；
+/// - `Unauthorized`（凭据不一致）→ 立即返回错误（凭据问题与基址无关，无需重试）；
+/// - 其他错误（transport / HTTP 4xx/5xx）→ 记录并尝试下一候选；
+/// - 全部失败 → 返回最后一个错误。
+///
+/// 供项目/会话列表与 pair 等「服务端主动请求」复用，使其与状态探测一样具备
+/// 公网兜底能力——修复「设备在线但项目/会话为空」：探测走了公网兜底而列表
+/// 只走内网单路径导致的 base 策略不对称。
+pub async fn try_each_base<T, Fut, F>(bases: &[String], key: &str, mut f: F) -> Result<T, OcError>
+where
+    F: FnMut(OcClient) -> Fut,
+    Fut: std::future::Future<Output = Result<T, OcError>>,
+{
+    let mut last_err: Option<OcError> = None;
+    for base in bases {
+        let client = OcClient::new(base, key);
+        match f(client).await {
+            Ok(v) => return Ok(v),
+            Err(OcError::Unauthorized(code)) => {
+                tracing::warn!(base = %base, code, "鉴权不一致，不再尝试其他基址");
+                return Err(OcError::Unauthorized(code));
+            }
+            Err(e) => {
+                tracing::warn!(base = %base, error = %e, "该基址请求失败，尝试下一个候选");
+                last_err = Some(e);
+            }
+        }
+    }
+    Err(last_err.unwrap_or_else(|| OcError::Other("无可用基址".into())))
+}
+
 /// 探测单台设备（永不返回 Err：探测失败本身就是一种状态）。
 ///
 /// 多路径回退：依次尝试候选基址，任一 200 即 online；任一 401/403 直接判

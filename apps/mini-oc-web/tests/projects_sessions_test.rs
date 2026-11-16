@@ -250,3 +250,59 @@ async fn sessions_live_passes_directory_param() {
     assert_eq!(body["data"][0]["title"], "会话一");
     device.verify().await;
 }
+
+#[tokio::test]
+async fn projects_falls_back_to_public_when_internal_base_unreachable() {
+    // 回归：探测/列表 base 策略不对称——内网 rathole 直连不可达时，列表必须回退公网，
+    // 否则「设备在线但项目为空」（探测经公网兜底 online，列表旧实现只走内网 → 空快照）。
+    let sb = MockServer::start().await;
+    let device = MockServer::start().await;
+    Mock::given(method("GET")).and(path("/api/project"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(project_response()))
+        .expect(1)
+        .mount(&device).await;
+    let mut user = test_user();
+    user.devices[0].public_url = device.uri();
+    mount_sb_users(&sb, &users_json(vec![user.clone()])).await;
+
+    // 内网基址指向本机必然拒绝的地址（拼 device.port 9464 后无 mock），公网 device.uri() 可用
+    let base = spawn_app_with_probe_base(&sb, "http://127.0.0.1").await;
+    let cookie = login_cookie(&base, &user.key).await;
+
+    let resp = reqwest::Client::new()
+        .get(format!("{base}/api/devices/macbook-pro/projects"))
+        .header("cookie", &cookie)
+        .send().await.unwrap();
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["source"], "live", "内网不通应回退公网取 live（而非空快照）");
+    assert_eq!(body["data"][0]["id"], "p1");
+    device.verify().await;
+}
+
+#[tokio::test]
+async fn sessions_falls_back_to_public_when_internal_base_unreachable() {
+    let sb = MockServer::start().await;
+    let device = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/session"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(session_response()))
+        .expect(1)
+        .mount(&device).await;
+    let mut user = test_user();
+    user.devices[0].public_url = device.uri();
+    mount_sb_users(&sb, &users_json(vec![user.clone()])).await;
+
+    let base = spawn_app_with_probe_base(&sb, "http://127.0.0.1").await;
+    let cookie = login_cookie(&base, &user.key).await;
+
+    let resp = reqwest::Client::new()
+        .get(format!("{base}/api/devices/macbook-pro/sessions"))
+        .header("cookie", &cookie)
+        .send().await.unwrap();
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["source"], "live", "会话列表同样应回退公网");
+    assert_eq!(body["data"][0]["id"], "ses_1");
+    device.verify().await;
+}

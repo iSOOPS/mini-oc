@@ -13,7 +13,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'portkill.dart';
 import 'supervisor.dart';
 
-// These functions are ignored because they are not marked as `pub`: `auto_bind_approved_device`, `bound_device_brief`, `current_key`, `effective_port`, `fetch_devices`, `global_supervisor`, `prepare_rathole`, `rathole_settings_dir`, `real_probe`, `real_rathole_command`, `real_serve_command`, `report_port`, `require_serve`
+// These functions are ignored because they are not marked as `pub`: `auto_bind_approved_device`, `bound_device_brief`, `current_key`, `default_opencode_bin`, `effective_port`, `fetch_devices`, `global_supervisor`, `prepare_rathole`, `rathole_settings_dir`, `real_probe`, `real_rathole_command`, `real_serve_command`, `report_port`, `require_serve`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`
 
 /// 登录（见 account::login）。
@@ -60,6 +60,11 @@ Future<void> killPortOccupant({required int port}) =>
     RustLib.instance.api.crateApiKillPortOccupant(port: port);
 
 /// opencode 二进制定位：OPENCODE_BIN env → config.opencode_bin → PATH。
+///
+/// Windows 特判：默认名 `opencode` 在 Windows 上通常是 npm 生成的
+/// `opencode.cmd`/`opencode`（shell 脚本）而非可执行文件，`Command::new("opencode")`
+/// 不做 PATHEXT 扩展会 `NotFound`。故默认回退时优先探测 `opencode.cmd`，其次
+/// `opencode.exe`，都无则退回 `opencode`（交由上层 spawn 报明确错误）。
 Future<String> resolveOpencodeBin() =>
     RustLib.instance.api.crateApiResolveOpencodeBin();
 

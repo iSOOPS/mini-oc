@@ -30,6 +30,22 @@ pub async fn spawn_app_with_static(sb: &MockServer, static_dir: Option<String>) 
     format!("http://{addr}")
 }
 
+/// 启动应用并指定内网 rathole 探测基址（直接注入 AppState 字段，规避 env 竞态）。
+///
+/// 用于固化「内网直连不可达 → 公网兜底」的探测/列表/跳转多路径回退行为。
+pub async fn spawn_app_with_probe_base(sb: &MockServer, probe_base: &str) -> String {
+    let mut state =
+        AppState::with_key(&sb.uri(), "admin", "sbpass", TEST_COOKIE_KEY.to_vec()).unwrap();
+    state.rathole_probe_base = probe_base.to_string();
+    let app = mini_oc_web::routes::build_router(Arc::new(state));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    format!("http://{addr}")
+}
+
 /// 在 wiremock 上挂 SB 登录 + 注册表读取。
 pub async fn mount_sb_users(sb: &MockServer, body: &str) {
     Mock::given(method("POST"))

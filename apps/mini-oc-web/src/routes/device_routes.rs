@@ -2,7 +2,7 @@
 //! 项目/会话列表与跳转在 Task 8/9 填充。
 
 use crate::error::{AppError, AppResult};
-use crate::probe::{probe_device, resolve_probe_base};
+use crate::probe::{probe_bases, probe_device, try_each_base};
 use crate::routes::auth_routes::{current_user, extract_ip};
 use crate::routes::SharedState;
 use crate::snapshot::dual_source;
@@ -328,20 +328,6 @@ async fn find_device(
     Ok((user, device))
 }
 
-/// 构造设备的 OcClient（basic opencode:<user.key>）。
-///
-/// 服务端主动调用走内网 rathole 直连（`internal_base`，见 [`crate::probe::resolve_probe_base`]），
-/// 未配置时退回 public_url 端口形态。
-fn device_client(
-    user: &mini_oc_core::device::PortalUser,
-    device: &mini_oc_core::device::UserDevice,
-    internal_base: &str,
-) -> AppResult<OcClient> {
-    let base = resolve_probe_base(internal_base, &device.public_url, device.port)
-        .map_err(|e| AppError::InvalidTarget(e.to_string()))?;
-    Ok(OcClient::new(&base, &user.key))
-}
-
 /// OcError → AppError 映射（保持双源判别语义）。
 fn oc_err(e: OcError) -> AppError {
     match e {
@@ -364,10 +350,10 @@ async fn projects(
     if let Some(cached) = state.live_cache.get(&cache_key).await {
         return Ok(Json(cached));
     }
-    let live = match device_client(&user, &device, &state.rathole_probe_base) {
-        Ok(client) => client.projects().await.map_err(oc_err),
-        Err(e) => Err(e),
-    };
+    let bases = probe_bases(&state.rathole_probe_base, &device.public_url, device.port);
+    let live = try_each_base(&bases, &user.key, |c| async move { c.projects().await })
+        .await
+        .map_err(oc_err);
     let resp = dual_source(state.sb.clone(), &user.id, &name, "projects", live).await?;
     // 仅 live 结果进入缓存
     if resp["source"] == "live" {
@@ -393,10 +379,14 @@ async fn sessions(
     if let Some(cached) = state.live_cache.get(&cache_key).await {
         return Ok(Json(cached));
     }
-    let live = match device_client(&user, &device, &state.rathole_probe_base) {
-        Ok(client) => client.sessions(directory.as_deref()).await.map_err(oc_err),
-        Err(e) => Err(e),
-    };
+    let bases = probe_bases(&state.rathole_probe_base, &device.public_url, device.port);
+    let dir = directory.clone();
+    let live = try_each_base(&bases, &user.key, move |c| {
+        let d = dir.clone();
+        async move { c.sessions(d.as_deref()).await }
+    })
+    .await
+    .map_err(oc_err);
     let mut resp = dual_source(state.sb.clone(), &user.id, &name, "sessions", live).await?;
     // I8 修复：快照按 device 共享一份——回退数据必须按请求 directory 过滤
     if resp["source"] == "snapshot" {
@@ -438,11 +428,30 @@ async fn jump(
     // 公网跳转入口（浏览器导航用，必须走公网地址）
     let tunnel = tunnel_base_url(&device.public_url, device.port)
         .map_err(|e| AppError::InvalidTarget(e.to_string()))?;
-    // BFF 代设备签发 pair 是服务端主动调用，走内网 rathole 直连（绕开公网回环）
-    let internal = resolve_probe_base(&state.rathole_probe_base, &device.public_url, device.port)
-        .map_err(|e| AppError::InvalidTarget(e.to_string()))?;
-    let client = OcClient::new(&internal, &user.key);
-    let code = client.pair().await.map_err(oc_err)?;
+    // BFF 代设备签发 pair 是服务端主动调用，多基址回退（内网优先 → 公网兜底），
+    // 与探测/列表策略对齐；code 一次性，后续 redeem 必须用签发它的同一 client。
+    let pair_bases = probe_bases(&state.rathole_probe_base, &device.public_url, device.port);
+    let mut chosen: Option<(OcClient, String)> = None;
+    let mut last_err: Option<OcError> = None;
+    for base in &pair_bases {
+        let client = OcClient::new(base, &user.key);
+        match client.pair().await {
+            Ok(code) => {
+                chosen = Some((client, code));
+                break;
+            }
+            Err(OcError::Unauthorized(code)) => return Err(oc_err(OcError::Unauthorized(code))),
+            Err(e) => last_err = Some(e),
+        }
+    }
+    let (client, code) = match chosen {
+        Some(p) => p,
+        None => {
+            return Err(oc_err(
+                last_err.unwrap_or_else(|| OcError::Other("无可用基址".into())),
+            ))
+        }
+    };
 
     let url = match params.get("session").filter(|s| !s.is_empty()) {
         Some(session) => {

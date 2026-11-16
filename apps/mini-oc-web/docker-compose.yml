@@ -12,6 +12,9 @@ services:
       SB_USER: ${SB_USER:-admin}
       SB_PASSWORD: ${SB_PASSWORD:?需要在 .env 设置}
       PORTAL_BASE: ${PORTAL_BASE:-http://127.0.0.1:8100}
+      # 服务端主动探测/列表/pair 的内网 rathole 基址（如 http://rathole）。
+      # 门户与 rathole 同机 docker 部署时必设；不同机/本地开发留空即退回公网。
+      RATHOLE_PROBE_BASE: ${RATHOLE_PROBE_BASE:-}
     volumes:
       - mini-oc-web-data:/data
     networks:
