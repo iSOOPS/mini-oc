@@ -1,6 +1,6 @@
 #!/bin/bash
 # mini-oc macOS release 打包（需 Xcode + Flutter SDK + Homebrew CocoaPods）
-# 产物：build/macos/Build/Products/Release/mini_oc.app（universal binary + rathole bundle）
+# 产物：build/macos/Build/Products/Release/mini-oc.app（universal binary + rathole bundle）
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -32,7 +32,7 @@ GEM_HOME="/opt/homebrew/Cellar/cocoapods/1.17.0_1/libexec" \
 GEM_PATH="/opt/homebrew/Cellar/cocoapods/1.17.0_1/libexec" \
   "$FLUTTER_BIN" build macos --release
 
-APP="build/macos/Build/Products/Release/mini_oc.app"
+APP="build/macos/Build/Products/Release/mini-oc.app"
 if [ ! -d "$APP" ]; then
   echo "!! 构建产物缺失：$APP" >&2
   exit 1

@@ -12,8 +12,7 @@ const isAuthPage = computed(() => route.path === '/login' || route.path === '/ad
 
 const tabs = [
   { path: '/devices', label: '设备', icon: '🖥' },
-  { path: '/projects', label: '项目', icon: '📁' },
-  { path: '/sessions', label: '会话', icon: '💬' },
+  { path: '/profile', label: '我的', icon: '👤' },
 ]
 </script>
 

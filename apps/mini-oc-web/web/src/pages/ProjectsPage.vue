@@ -1,32 +1,39 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
-import { api, type Device, type DualSource, type Project } from '../api'
+import { computed, onMounted, ref } from 'vue'
+import { api, type DualSource, type Project } from '../api'
 import { useAuthStore } from '../store'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 const auth = useAuthStore()
 const router = useRouter()
+const route = useRoute()
 
-const device = ref<Device | null>(null)
+// 单设备模式：设备名来自路由参数（从设备卡片「项目」按钮进入）
+const deviceName = ref<string>('')
+const deviceDesc = ref<string>('')
 const result = ref<DualSource<Project> | null>(null)
 const busy = ref(false)
 const error = ref('')
 const search = ref('')
 
 onMounted(async () => {
-  // 默认选第一台在线设备
-  await auth.probe().catch(() => {})
-  device.value = auth.onlineDevices[0] ?? auth.devices[0] ?? null
+  deviceName.value = (route.params.name as string) || ''
+  if (!deviceName.value) {
+    // 兜底：无设备名时回退设备列表
+    await auth.probe().catch(() => {})
+    deviceName.value = auth.onlineDevices[0]?.name ?? auth.devices[0]?.name ?? ''
+  }
+  const dev = auth.devices.find((d) => d.name === deviceName.value)
+  deviceDesc.value = dev ? (dev.desc || dev.deviceName) : deviceName.value
+  await load()
 })
 
-watch(device, load)
-
 async function load() {
-  if (!device.value) return
+  if (!deviceName.value) return
   busy.value = true
   error.value = ''
   try {
-    result.value = await api.deviceProjects(device.value.name)
+    result.value = await api.deviceProjects(deviceName.value)
   } catch (e: any) {
     error.value = e?.message ?? '加载失败'
   } finally {
@@ -44,7 +51,14 @@ const filtered = computed(() => {
 })
 
 function openSessions(p: Project) {
-  router.push({ path: '/sessions', query: { device: device.value?.name, directory: p.canonical } })
+  router.push({
+    path: `/devices/${deviceName.value}/sessions`,
+    query: { directory: p.canonical },
+  })
+}
+
+function back() {
+  router.push('/devices')
 }
 
 function fmtTime(canonical: string) {
@@ -55,10 +69,11 @@ function fmtTime(canonical: string) {
 <template>
   <div class="page">
     <header class="head">
-      <h1>项目</h1>
-      <select v-model="device" class="picker">
-        <option v-for="d in auth.devices" :key="d.name" :value="d">{{ d.desc }}（{{ d.name }}）</option>
-      </select>
+      <div class="title-block">
+        <button class="btn ghost small" @click="back">‹ 返回</button>
+        <h1>项目</h1>
+        <span class="dev-tag">{{ deviceDesc }}（{{ deviceName }}）</span>
+      </div>
     </header>
 
     <div v-if="result?.source === 'snapshot'" class="banner">
@@ -70,7 +85,7 @@ function fmtTime(canonical: string) {
     <div v-if="error" class="card err">{{ error }}</div>
     <div v-else-if="busy" class="card empty">加载中…</div>
     <div v-else-if="filtered.length === 0" class="card empty">
-      {{ device ? '暂无项目——在设备端用 opencode 打开过项目后会出现在这里' : '请先选择设备' }}
+      暂无项目——在设备端用 opencode 打开过项目后会出现在这里
     </div>
 
     <transition-group name="fade" tag="div" class="list">
@@ -86,8 +101,9 @@ function fmtTime(canonical: string) {
 <style scoped>
 .page { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
 .head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.head h1 { font-size: 26px; letter-spacing: -0.5px; }
-.picker { width: auto; }
+.title-block { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.title-block h1 { font-size: 24px; letter-spacing: -0.5px; }
+.dev-tag { font-size: 13px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .banner { background: var(--primary-weak); color: var(--primary); border-radius: var(--radius-m); padding: 10px 14px; font-size: 13px; }
 .list { display: flex; flex-direction: column; gap: 10px; }
 .proj { text-align: left; cursor: pointer; border: none; font: inherit; color: inherit; transition: transform 0.12s ease; }

@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { api, type DualSource, type Session } from '../api'
 import { useAuthStore } from '../store'
 
 const route = useRoute()
+const router = useRouter()
 const auth = useAuthStore()
 
+// 单设备模式：设备名来自路由参数（从设备卡片「会话」按钮进入）
 const deviceName = ref<string>('')
+const deviceDesc = ref<string>('')
 const directory = ref<string>('')
 const result = ref<DualSource<Session> | null>(null)
 const busy = ref(false)
@@ -17,22 +20,25 @@ const jumpInfo = ref<{ url: string; expiresIn: number } | null>(null)
 const jumpBlocked = ref(false)
 
 onMounted(async () => {
-  deviceName.value = (route.query.device as string) || ''
+  deviceName.value = (route.params.name as string) || ''
   directory.value = (route.query.directory as string) || ''
   if (!deviceName.value) {
     await auth.probe().catch(() => {})
     deviceName.value = auth.onlineDevices[0]?.name ?? auth.devices[0]?.name ?? ''
   }
+  const dev = auth.devices.find((d) => d.name === deviceName.value)
+  deviceDesc.value = dev ? (dev.desc || dev.deviceName) : deviceName.value
   await load()
 })
 
-watch(() => route.query, () => {
-  const d = route.query.device as string
-  const dir = route.query.directory as string
-  if (d) deviceName.value = d
-  if (dir !== undefined) directory.value = dir
-  load()
-})
+watch(
+  () => route.query,
+  () => {
+    const dir = route.query.directory as string
+    if (dir !== undefined) directory.value = dir
+    load()
+  },
+)
 
 async function load() {
   if (!deviceName.value) return
@@ -64,6 +70,10 @@ function fmtTime(ts: number) {
   return d.toLocaleDateString()
 }
 
+function back() {
+  router.push('/devices')
+}
+
 async function jump(s?: Session) {
   if (!deviceName.value) return
   const dir = s?.directory || directory.value
@@ -84,7 +94,11 @@ async function jump(s?: Session) {
 <template>
   <div class="page">
     <header class="head">
-      <h1>会话</h1>
+      <div class="title-block">
+        <button class="btn ghost small" @click="back">‹ 返回</button>
+        <h1>会话</h1>
+        <span class="dev-tag">{{ deviceDesc }}（{{ deviceName }}）</span>
+      </div>
       <button class="btn small" @click="jump()">➜ 在设备上打开</button>
     </header>
 
@@ -124,8 +138,10 @@ async function jump(s?: Session) {
 
 <style scoped>
 .page { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
-.head { display: flex; align-items: center; justify-content: space-between; }
-.head h1 { font-size: 26px; letter-spacing: -0.5px; }
+.head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.title-block { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.title-block h1 { font-size: 24px; letter-spacing: -0.5px; }
+.dev-tag { font-size: 13px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .banner { background: var(--primary-weak); color: var(--primary); border-radius: var(--radius-m); padding: 10px 14px; font-size: 13px; }
 .dir { font-size: 13px; color: var(--text-2); word-break: break-all; }
 .list { display: flex; flex-direction: column; gap: 10px; }

@@ -8,6 +8,12 @@ const users = ref<AdminUser[]>([])
 const busy = ref(false)
 const error = ref('')
 
+// 穿透地址默认值（rathole 隧道公网入口，超管录入设备的固定服务器地址）
+const DEFAULT_PUBLIC_URL = 'https://oc.isoops.com'
+
+// 保存后的生效提示（提示需手动改服务器 rathole config）
+const notice = ref('')
+
 // 新增用户表单
 const showForm = ref(false)
 const formName = ref('')
@@ -51,9 +57,11 @@ function openCreate() {
   showForm.value = true
 }
 
-// 打开单设备编辑：拷贝草稿，记录原始服务名作定位键
+// 打开单设备编辑：拷贝草稿，记录原始服务名作定位键；穿透地址为空时自动填充默认值
 function openDeviceEdit(u: AdminUser, d: AdminDevice) {
-  editingDevice.value = { userId: u.id, device: { ...d }, matchName: d.name }
+  const copy = { ...d }
+  if (!copy.publicUrl.trim()) copy.publicUrl = DEFAULT_PUBLIC_URL
+  editingDevice.value = { userId: u.id, device: copy, matchName: d.name }
 }
 
 function closeDeviceEdit() {
@@ -64,6 +72,7 @@ async function saveDeviceEdit() {
   const ed = editingDevice.value
   if (!ed) return
   error.value = ''
+  notice.value = ''
   try {
     await api.adminUpdateUser(ed.userId, {
       devices: [
@@ -76,7 +85,9 @@ async function saveDeviceEdit() {
         },
       ],
     })
+    const savedName = ed.device.name
     editingDevice.value = null
+    notice.value = `对应的 ${savedName}（Rathole 服务名称）需要修改服务器 rathole config 配置目录方可生效。`
     await load()
   } catch (e: any) {
     error.value = e?.message ?? '保存失败'
@@ -136,7 +147,11 @@ function openApproveForm(p: PendingDevice) {
   const f = approveForm.value[p.deviceId]
   // 已打开时不重置，避免再次点击清空已填内容
   if (f?.open) return
-  approveForm.value[p.deviceId] = { open: true, name: f?.name ?? '', publicUrl: f?.publicUrl ?? '' }
+  approveForm.value[p.deviceId] = {
+    open: true,
+    name: f?.name ?? '',
+    publicUrl: f?.publicUrl ?? DEFAULT_PUBLIC_URL,
+  }
 }
 
 function closeApproveForm(p: PendingDevice) {
@@ -147,12 +162,15 @@ async function approvePending(u: AdminUser, p: PendingDevice) {
   const f = approveForm.value[p.deviceId]
   if (!f || !f.name.trim() || !f.publicUrl.trim()) return
   error.value = ''
+  notice.value = ''
   try {
     await api.adminApproveDevice(u.id, p.deviceId, {
       name: f.name.trim(),
       publicUrl: f.publicUrl.trim(),
     })
+    const savedName = f.name.trim()
     closeApproveForm(p)
+    notice.value = `对应的 ${savedName}（Rathole 服务名称）需要修改服务器 rathole config 配置目录方可生效。`
     await load()
   } catch (e: any) {
     error.value = e?.message ?? '同意失败'
@@ -256,6 +274,8 @@ function setApproveField(p: PendingDevice, field: 'name' | 'publicUrl', v: strin
 
     <div v-if="error" class="card err">{{ error }}</div>
 
+    <div v-if="notice" class="card notice">{{ notice }}</div>
+
     <div v-if="showForm" class="card form">
       <h3>新增用户</h3>
       <label>用户名（字母数字 _ -）</label>
@@ -308,7 +328,7 @@ function setApproveField(p: PendingDevice, field: 'name' | 'publicUrl', v: strin
         </div>
         <div>
           <label>穿透地址（自动剥协议）</label>
-          <input v-model="editingDevice.device.publicUrl" @blur="peel(editingDevice.device)" placeholder="oc.example.com 或 http://1.2.3.4:9101" />
+          <input v-model="editingDevice.device.publicUrl" @blur="peel(editingDevice.device)" placeholder="https://oc.isoops.com" />
         </div>
       </div>
 
@@ -373,7 +393,7 @@ function setApproveField(p: PendingDevice, field: 'name' | 'publicUrl', v: strin
                 </div>
                 <div>
                   <label>穿透地址（必填，自动剥协议）</label>
-                  <input :value="approveField(p, 'publicUrl')" @blur="setApproveField(p, 'publicUrl', peelStr(approveField(p, 'publicUrl')))" @input="setApproveField(p, 'publicUrl', ($event.target as HTMLInputElement).value)" placeholder="oc.example.com" />
+                  <input :value="approveField(p, 'publicUrl')" @blur="setApproveField(p, 'publicUrl', peelStr(approveField(p, 'publicUrl')))" @input="setApproveField(p, 'publicUrl', ($event.target as HTMLInputElement).value)" placeholder="https://oc.isoops.com" />
                 </div>
               </div>
               <div class="form-actions">
@@ -434,4 +454,5 @@ function setApproveField(p: PendingDevice, field: 'name' | 'publicUrl', v: strin
 .approve-form { border-top: 1px dashed var(--surface-2); padding-top: 10px; display: flex; flex-direction: column; gap: 8px; }
 .empty { text-align: center; color: var(--text-2); padding: 28px; }
 .err { color: var(--red); }
+.notice { color: var(--orange); font-size: 14px; }
 </style>

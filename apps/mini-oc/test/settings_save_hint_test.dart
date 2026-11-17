@@ -42,7 +42,7 @@ Future<void> tapSave(WidgetTester tester) async {
 }
 
 void main() {
-  testWidgets('只改端口保存 → 提示不含重启字样（I19）', (tester) async {
+  testWidgets('只改端口保存 → 提示联系管理员（基础端口变更）', (tester) async {
     final bridge = MutableCfg(const ClientConfig(
       serverUrl: 'https://oc.example.com',
       port: 9464,
@@ -57,7 +57,8 @@ void main() {
     await tapSave(tester);
 
     expect(bridge.saved.single.port, 9466);
-    expect(find.textContaining('已保存'), findsOneWidget, reason: '保存成功提示');
+    expect(find.textContaining('基础端口'), findsOneWidget, reason: '改端口提示联系管理员');
+    expect(find.textContaining('管理员'), findsOneWidget);
     expect(find.textContaining('重新登录'), findsNothing,
         reason: '仅改端口不需要重启/重登提示');
   });

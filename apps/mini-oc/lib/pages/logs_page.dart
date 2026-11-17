@@ -153,7 +153,9 @@ class _LogsPageState extends ConsumerState<LogsPage> {
                     itemBuilder: (_, i) {
                       final l = lines[i];
                       final color = switch (l.level) {
-                        'warn' || 'error' => scheme.error,
+                        // error 玫红（柔和，不刺眼）；warning/warn 橙黄
+                        'error' => const Color(0xFFD4607E),
+                        'warn' || 'warning' => const Color(0xFFE09B3D),
                         'debug' => scheme.outline,
                         _ => null,
                       };

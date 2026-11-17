@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useAuthStore } from '../store'
 import type { DeviceStatus } from '../api'
 
 const auth = useAuthStore()
+const router = useRouter()
 
 onMounted(() => {
   // 静默首载（ADR 17：进入页面无 spinner 打扰）
@@ -24,6 +26,14 @@ function statusText(status?: DeviceStatus) {
   if (status === 'online') return '在线'
   if (status === 'auth_mismatch') return '凭据不一致'
   return '未启动服务'
+}
+
+function openProjects(name: string) {
+  router.push(`/devices/${name}/projects`)
+}
+
+function openSessions(name: string) {
+  router.push(`/devices/${name}/sessions`)
 }
 </script>
 
@@ -55,6 +65,10 @@ function statusText(status?: DeviceStatus) {
         凭据不一致：用户密钥已重置，请在设备端重启云服务。
       </p>
       <p v-if="d.status === 'offline'" class="hint">未启动 opencode 服务：请在设备端 mini-oc 主页开启「启动云服务」（或「启动本地服务」）。</p>
+      <div class="card-actions">
+        <button class="btn small" :disabled="d.status !== 'online'" @click="openProjects(d.name)">📁 项目</button>
+        <button class="btn small" :disabled="d.status !== 'online'" @click="openSessions(d.name)">💬 会话</button>
+      </div>
     </div>
 
     <div v-if="!auth.loading && auth.devices.length === 0" class="card empty">
@@ -79,5 +93,6 @@ function statusText(status?: DeviceStatus) {
 .meta dd { font-size: 14px; margin-top: 2px; }
 .hint { margin-top: 10px; font-size: 13px; color: var(--text-2); }
 .hint.warn { color: var(--orange); }
+.card-actions { display: flex; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--surface-2); }
 .empty { text-align: center; color: var(--text-2); padding: 32px; }
 </style>

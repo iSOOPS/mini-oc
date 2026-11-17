@@ -42,6 +42,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   late final TextEditingController _port;
   // 进入页面时的服务器地址快照（保存时对比判定是否需提示重新登录，I19）
   late final String _initialServer;
+  // 进入页面时的端口快照（保存时对比判定是否需提示联系管理员）
+  late final String _initialPort;
   bool _dirty = false;
 
   @override
@@ -52,6 +54,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     _initialServer = cfg.serverUrl;
     _server = TextEditingController(text: cfg.serverUrl);
     _port = TextEditingController(text: cfg.port.toString());
+    _initialPort = _port.text;
     // pending 态进页面 → 自动静默重报一次（重报幂等，是感知管理员批准的唯一途径；
     // 批准后状态更新为已绑定并自动完成绑定，主页云服务开关随即可用）
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -95,10 +98,13 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         // 提示按实际改动区分（I19）：仅改端口等无需重启；服务器地址变更
         // 才提示重新登录（旧提示对任何改动都带重启字样，误导）
         final serverChanged = newServer != _initialServer;
+        final portChanged = _port.text.trim() != _initialPort;
         ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
-            content: Text(serverChanged
-                ? '已保存（服务器地址修改需重新登录生效）'
-                : '已保存 ✓')));
+            content: Text(portChanged
+                ? '因修改基础端口，请联系管理员修改配置，否则无法使用'
+                : serverChanged
+                    ? '已保存（服务器地址修改需重新登录生效）'
+                    : '已保存 ✓')));
       }
     } catch (e) {
       if (mounted) {
@@ -193,7 +199,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   const Text('关于',
                       style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
                   const SizedBox(height: 6),
-                  Text('mini-oc v2.0.0',
+                  Text('mini-oc v2.0.4',
                       style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13)),
                   Text('opencode 远程工作站客户端',
                       style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13)),
