@@ -98,12 +98,19 @@ fn real_serve_command() -> Box<dyn Fn(u16) -> std::process::Command + Send + Syn
     })
 }
 
-/// opencode 二进制定位：OPENCODE_BIN env → config.opencode_bin → PATH。
+/// opencode 二进制定位：OPENCODE_BIN env → config.opencode_bin → PATH（绝对路径）→
+/// 常见安装位 → 裸名兜底。
 ///
 /// Windows 特判：默认名 `opencode` 在 Windows 上通常是 npm 生成的
 /// `opencode.cmd`/`opencode`（shell 脚本）而非可执行文件，`Command::new("opencode")`
 /// 不做 PATHEXT 扩展会 `NotFound`。故默认回退时优先探测 `opencode.cmd`，其次
 /// `opencode.exe`，都无则退回 `opencode`（交由上层 spawn 报明确错误）。
+///
+/// GUI 启动（I21）：macOS 从 Finder/`open` 启动的 .app 只继承 launchd 最小 PATH
+/// （`/usr/bin:/bin:/usr/sbin:/sbin`），不含 npm 全局目录等用户级 bin——裸名回退
+/// 会 NotFound（报「启动失败（检查二进制路径）」）。故 PATH 探测命中时返回
+/// **绝对路径**（跨 PATH 环境仍可 spawn），PATH 之外再探测常见安装位（npm
+/// 全局 prefix、opencode 官方目录、Homebrew 等）。
 pub fn resolve_opencode_bin() -> String {
     if let Ok(p) = std::env::var("OPENCODE_BIN") {
         if !p.is_empty() {
@@ -115,7 +122,69 @@ pub fn resolve_opencode_bin() -> String {
             return p;
         }
     }
+    // PATH 探测（Windows 带扩展名特判）→ 返回绝对路径
+    if let Some(found) = which_opencode_in_path() {
+        return found.to_string_lossy().to_string();
+    }
+    // 常见安装位（GUI 最小 PATH 场景的主命中路径）
+    if let Some(found) = probe_common_install_dirs() {
+        return found.to_string_lossy().to_string();
+    }
     default_opencode_bin()
+}
+
+/// 在 PATH 上探测 opencode（Windows 优先 `.cmd`/`.exe`），返回绝对路径。
+fn which_opencode_in_path() -> Option<std::path::PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        for name in ["opencode.cmd", "opencode.exe", "opencode"] {
+            if let Some(found) = which_in_path(name) {
+                return Some(found);
+            }
+        }
+        None
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        which_in_path("opencode")
+    }
+}
+
+/// 探测常见安装位（PATH 之外的用户级 bin 目录），返回存在的 opencode 绝对路径。
+///
+/// 覆盖 opencode 的主流安装方式：
+/// - `~/.npm-global/bin`：npm 自定义 prefix（`~/.npmrc` 的 `prefix=…`）
+/// - `~/.opencode/bin`：opencode 官方安装脚本（curl … | sh）
+/// - `~/.local/bin`：手动/通用用户级安装
+/// - `~/.bun/bin`：bun 全局安装
+/// - `/opt/homebrew/bin` / `/usr/local/bin`：Homebrew（Apple Silicon / Intel）
+///
+/// 仅内部与测试使用（PathBuf 返回类型无需暴露给 Dart）。
+#[flutter_rust_bridge::frb(ignore)]
+pub fn probe_common_install_dirs() -> Option<std::path::PathBuf> {
+    let name = if cfg!(target_os = "windows") {
+        "opencode.exe"
+    } else {
+        "opencode"
+    };
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(std::path::PathBuf::from);
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+    if let Some(h) = &home {
+        candidates.push(h.join(".npm-global/bin"));
+        candidates.push(h.join(".opencode/bin"));
+        candidates.push(h.join(".local/bin"));
+        candidates.push(h.join(".bun/bin"));
+        // Windows npm 默认全局 prefix
+        candidates.push(h.join("AppData/Roaming/npm"));
+    }
+    candidates.push(std::path::PathBuf::from("/opt/homebrew/bin"));
+    candidates.push(std::path::PathBuf::from("/usr/local/bin"));
+    candidates
+        .into_iter()
+        .map(|d| d.join(name))
+        .find(|full| full.is_file())
 }
 
 /// 默认 opencode 二进制名（Windows 探测 .cmd/.exe；其余平台 `opencode`）。
@@ -124,26 +193,22 @@ pub(crate) fn default_opencode_bin() -> String {
     {
         // npm 安装的 opencode 在 Windows 上落为 opencode.cmd（或 .exe）；Rust 的
         // Command::new 不会自动补扩展名，须显式探测可执行的那一个。
-        if which_in_path("opencode.cmd") {
+        if which_in_path("opencode.cmd").is_some() {
             return "opencode.cmd".into();
         }
-        if which_in_path("opencode.exe") {
+        if which_in_path("opencode.exe").is_some() {
             return "opencode.exe".into();
         }
     }
     "opencode".into()
 }
 
-/// 探测某可执行名是否存在于 PATH（Windows 特判辅助，跨平台安全）。
-#[cfg(target_os = "windows")]
-fn which_in_path(name: &str) -> bool {
-    std::env::var_os("PATH")
-        .map(|p| {
-            std::env::split_paths(&p)
-                .map(|dir| dir.join(name))
-                .any(|full| full.is_file())
-        })
-        .unwrap_or(false)
+/// 在 PATH 上探测某可执行名，返回绝对路径（找不到返回 None）。
+fn which_in_path(name: &str) -> Option<std::path::PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .map(|dir| dir.join(name))
+        .find(|full| full.is_file())
 }
 
 /// 真实探针：GET /api/info（basic opencode:<key>）。

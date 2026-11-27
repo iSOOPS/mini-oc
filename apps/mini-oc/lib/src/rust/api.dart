@@ -13,8 +13,9 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'portkill.dart';
 import 'supervisor.dart';
 
-// These functions are ignored because they are not marked as `pub`: `auto_bind_approved_device`, `bound_device_brief`, `current_key`, `default_opencode_bin`, `effective_port`, `fetch_devices`, `global_supervisor`, `prepare_rathole`, `rathole_settings_dir`, `real_probe`, `real_rathole_command`, `real_serve_command`, `report_port`, `require_serve`, `which_in_path`
+// These functions are ignored because they are not marked as `pub`: `auto_bind_approved_device`, `bound_device_brief`, `current_key`, `default_opencode_bin`, `effective_port`, `fetch_devices`, `global_supervisor`, `prepare_rathole`, `rathole_settings_dir`, `real_probe`, `real_rathole_command`, `real_serve_command`, `report_port`, `require_serve`, `which_in_path`, `which_opencode_in_path`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`
+// These functions are ignored (category: IgnoreBecauseExplicitAttribute): `probe_common_install_dirs`
 
 /// 登录（见 account::login）。
 Future<AccountInfo> login({required String serverUrl, required String key}) =>
@@ -59,12 +60,19 @@ PortOccupant? queryPortOccupant({required int port}) =>
 Future<void> killPortOccupant({required int port}) =>
     RustLib.instance.api.crateApiKillPortOccupant(port: port);
 
-/// opencode 二进制定位：OPENCODE_BIN env → config.opencode_bin → PATH。
+/// opencode 二进制定位：OPENCODE_BIN env → config.opencode_bin → PATH（绝对路径）→
+/// 常见安装位 → 裸名兜底。
 ///
 /// Windows 特判：默认名 `opencode` 在 Windows 上通常是 npm 生成的
 /// `opencode.cmd`/`opencode`（shell 脚本）而非可执行文件，`Command::new("opencode")`
 /// 不做 PATHEXT 扩展会 `NotFound`。故默认回退时优先探测 `opencode.cmd`，其次
 /// `opencode.exe`，都无则退回 `opencode`（交由上层 spawn 报明确错误）。
+///
+/// GUI 启动（I21）：macOS 从 Finder/`open` 启动的 .app 只继承 launchd 最小 PATH
+/// （`/usr/bin:/bin:/usr/sbin:/sbin`），不含 npm 全局目录等用户级 bin——裸名回退
+/// 会 NotFound（报「启动失败（检查二进制路径）」）。故 PATH 探测命中时返回
+/// **绝对路径**（跨 PATH 环境仍可 spawn），PATH 之外再探测常见安装位（npm
+/// 全局 prefix、opencode 官方目录、Homebrew 等）。
 Future<String> resolveOpencodeBin() =>
     RustLib.instance.api.crateApiResolveOpencodeBin();
 
